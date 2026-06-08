@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getDocuments, addDocument, deleteDocument } from '../lib/supabase'
+import { getDocuments, addDocument, deleteDocument, getProducts } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { formatDate } from '../lib/utils'
 import Loading from '../components/Loading'
@@ -9,56 +9,90 @@ const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 
 const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
 const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
 
-const TYPE_CONFIG = {
-  facture:    { label: 'Facture',          icon: '🧾', color: '#6366f1' },
-  certificat: { label: 'Certificat',       icon: '📜', color: '#10b981' },
-  commande:   { label: 'Bon de commande',  icon: '📋', color: '#3b82f6' },
-  rapport:    { label: 'Rapport',          icon: '📊', color: '#f59e0b' },
-  contrat:    { label: 'Contrat',          icon: '📝', color: '#8b5cf6' },
+const CATEGORIES = {
+  photo:       { label: 'Photos produit',    icon: '📸', color: '#6366f1' },
+  video:       { label: 'Videos',            icon: '🎬', color: '#ec4899' },
+  facture:     { label: 'Factures',          icon: '🧾', color: '#10b981' },
+  certificat:  { label: 'Certificats',       icon: '📜', color: '#f59e0b' },
+  commande:    { label: 'Bons de commande',  icon: '📋', color: '#3b82f6' },
+  technique:   { label: 'Fiches techniques', icon: '🔧', color: '#8b5cf6' },
+  packaging:   { label: 'Packaging / BAT',   icon: '📦', color: '#f97316' },
+  listing:     { label: 'Listing Amazon',    icon: '📝', color: '#06b6d4' },
+  autre:       { label: 'Autres',            icon: '📁', color: '#6b7280' },
 }
 
+const mockProducts = [
+  { id: 'p1', name: 'Kit Phare LED H7', asin: 'B08N5WRWNW' },
+  { id: 'p2', name: 'Ampoule LED H4', asin: 'B09X1ZZKZL' },
+]
+
 const mockDocuments = [
-  { id: 'm1', name: 'Facture fournisseur #2024-042', type: 'facture', created_at: '2024-05-10', notes: 'Shenzhen Electronics Co.' },
-  { id: 'm2', name: 'Certificat CE - Kit Phare LED', type: 'certificat', created_at: '2024-04-28', notes: 'Valable jusqu\'en 2026' },
-  { id: 'm3', name: 'Bon de commande #BC-2024-018', type: 'commande', created_at: '2024-04-15', notes: '500 unites commandees' },
-  { id: 'm4', name: 'Rapport qualite Q1 2024', type: 'rapport', created_at: '2024-04-01', notes: '' },
-  { id: 'm5', name: 'Contrat fournisseur Shenzhen', type: 'contrat', created_at: '2024-03-15', notes: 'Renouvelable annuellement' },
+  { id: 'm1', name: 'Photo principale HD', type: 'photo', product_id: 'p1', created_at: '2024-05-10', notes: 'Photo packshot fond blanc' },
+  { id: 'm2', name: 'Video demo installation', type: 'video', product_id: 'p1', created_at: '2024-05-08', notes: 'Video 30s pour listing' },
+  { id: 'm3', name: 'Facture Shenzhen #042', type: 'facture', product_id: 'p1', created_at: '2024-04-28', notes: '500 unites' },
+  { id: 'm4', name: 'Certificat CE', type: 'certificat', product_id: 'p1', created_at: '2024-04-15', notes: 'Valable 2026' },
+  { id: 'm5', name: 'BAT packaging V3', type: 'packaging', product_id: 'p1', created_at: '2024-04-10', notes: 'Version finale approuvee' },
+  { id: 'm6', name: 'Fiche technique H7', type: 'technique', product_id: 'p1', created_at: '2024-04-05', notes: 'Specs completes' },
+  { id: 'm7', name: 'Photo lifestyle', type: 'photo', product_id: 'p2', created_at: '2024-05-02', notes: 'Sur vehicule' },
+  { id: 'm8', name: 'Facture Guangzhou #018', type: 'facture', product_id: 'p2', created_at: '2024-04-20', notes: '300 unites' },
+  { id: 'm9', name: 'Certificat FCC', type: 'certificat', product_id: 'p2', created_at: '2024-03-15', notes: '' },
 ]
 
 export default function Documents() {
   const { user } = useStore()
   const [documents, setDocuments] = useState([])
+  const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')
+  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [showForm, setShowForm] = useState(false)
+  const [showFolderForm, setShowFolderForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', type: 'facture', notes: '' })
+  const [form, setForm] = useState({ name: '', type: 'photo', notes: '', product_id: '' })
+  const [folderForm, setFolderForm] = useState({ name: '', asin: '' })
   const [useMock, setUseMock] = useState(false)
+  const [localProducts, setLocalProducts] = useState([])
 
   useEffect(() => { if (user) loadData() }, [user])
 
   const loadData = async () => {
-    const { data, error } = await getDocuments(user.id)
-    if (error || !data || data.length === 0) {
+    const [docRes, prodRes] = await Promise.all([getDocuments(user.id), getProducts(user.id)])
+    const hasProducts = prodRes.data && prodRes.data.length > 0
+    if (!hasProducts) {
+      setProducts(mockProducts)
+      setLocalProducts(mockProducts)
       setDocuments(mockDocuments)
       setUseMock(true)
     } else {
-      setDocuments(data)
+      setProducts(prodRes.data)
+      setLocalProducts(prodRes.data)
+      setDocuments(docRes.data || [])
       setUseMock(false)
     }
     setLoading(false)
   }
 
+  const createFolder = (e) => {
+    e.preventDefault()
+    const newP = { id: `p${Date.now()}`, name: folderForm.name, asin: folderForm.asin || 'N/A' }
+    setLocalProducts(prev => [...prev, newP])
+    setProducts(prev => [...prev, newP])
+    setFolderForm({ name: '', asin: '' })
+    setShowFolderForm(false)
+    setSelectedProduct(newP.id)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
-    if (useMock) {
-      setDocuments(prev => [{ ...form, id: `m${Date.now()}`, created_at: new Date().toISOString() }, ...prev])
+    const docData = { ...form, product_id: selectedProduct || form.product_id }
+    if (useMock || !selectedProduct || String(selectedProduct).startsWith('p')) {
+      setDocuments(prev => [{ ...docData, id: `m${Date.now()}`, created_at: new Date().toISOString() }, ...prev])
     } else {
-      await addDocument(user.id, form)
+      await addDocument(user.id, docData)
       await loadData()
     }
-    setForm({ name: '', type: 'facture', notes: '' })
+    setForm({ name: '', type: 'photo', notes: '', product_id: '' })
     setShowForm(false)
     setSaving(false)
   }
@@ -73,7 +107,9 @@ export default function Documents() {
     }
   }
 
-  const filtered = filter === 'all' ? documents : documents.filter(d => d.type === filter)
+  const allProducts = localProducts
+  const productDocs = selectedProduct ? documents.filter(d => d.product_id === selectedProduct) : []
+  const filteredDocs = categoryFilter === 'all' ? productDocs : productDocs.filter(d => d.type === categoryFilter)
 
   if (loading) return <Loading />
 
@@ -81,122 +117,205 @@ export default function Documents() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Documents</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Centralisez vos factures, certificats et documents fournisseurs</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Documents produits</h1>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Organisez tous vos fichiers par produit : photos, videos, factures, certificats...</p>
         </div>
-        <button onClick={() => setShowForm(true)}
-          style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          + Ajouter un document
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 22 }}>
-        {Object.entries(TYPE_CONFIG).map(([type, cfg]) => {
-          const count = documents.filter(d => d.type === type).length
-          return (
-            <div key={type} style={{ ...box, padding: 16, cursor: 'pointer', border: filter === type ? `1px solid ${cfg.color}` : '1px solid #e8e8e3' }}
-              onClick={() => setFilter(filter === type ? 'all' : type)}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>{cfg.label}s</p>
-                  <p style={{ fontSize: 24, fontWeight: 700, color: filter === type ? cfg.color : '#1a1a2e' }}>{count}</p>
-                </div>
-                <span style={{ fontSize: 22 }}>{cfg.icon}</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-        {[['all', `Tous (${documents.length})`], ...Object.entries(TYPE_CONFIG).map(([k, v]) => [k, `${v.icon} ${v.label}s`])].map(([val, label]) => (
-          <button key={val} onClick={() => setFilter(val)}
-            style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${filter === val ? '#6366f1' : '#e8e8e3'}`, background: filter === val ? '#6366f1' : '#fff', color: filter === val ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-            {label}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowFolderForm(true)}
+            style={{ padding: '10px 18px', background: '#fff', color: '#6366f1', border: '1px solid #6366f1', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            + Creer un dossier
           </button>
-        ))}
+          {selectedProduct && (
+            <button onClick={() => { setForm({ ...form, product_id: selectedProduct }); setShowForm(true) }}
+              style={{ padding: '10px 18px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              + Ajouter un fichier
+            </button>
+          )}
+        </div>
       </div>
 
-      <div style={{ ...box, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ background: '#fafaf8' }}>
-              {['Document', 'Type', 'Notes', 'Date', 'Actions'].map(h => (
-                <th key={h} style={{ padding: '10px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(doc => {
-              const cfg = TYPE_CONFIG[doc.type] || { icon: '📄', color: '#6b7280', label: doc.type }
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18, minHeight: 500 }}>
+        {/* Sidebar — product folders */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, padding: '0 4px' }}>
+            Dossiers produits ({allProducts.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {allProducts.map(p => {
+              const docCount = documents.filter(d => d.product_id === p.id).length
+              const isActive = selectedProduct === p.id
               return (
-                <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb' }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
-                  onMouseLeave={e => e.currentTarget.style.background = ''}>
-                  <td style={{ padding: '13px 18px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 38, height: 38, borderRadius: 10, background: `${cfg.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                        {cfg.icon}
-                      </div>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{doc.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: `${cfg.color}15`, color: cfg.color, border: `1px solid ${cfg.color}30` }}>
-                      {cfg.label}
-                    </span>
-                  </td>
-                  <td style={{ padding: '13px 18px', fontSize: 12, color: '#6b7280', maxWidth: 200 }}>
-                    {doc.notes || <span style={{ color: '#d1d5db' }}>-</span>}
-                  </td>
-                  <td style={{ padding: '13px 18px', fontSize: 12, color: '#9ca3af' }}>
-                    {doc.created_at ? formatDate(doc.created_at) : '-'}
-                  </td>
-                  <td style={{ padding: '13px 18px' }}>
-                    <button onClick={() => handleDelete(doc.id)}
-                      style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-                      Supprimer
-                    </button>
-                  </td>
-                </tr>
+                <button key={p.id} onClick={() => { setSelectedProduct(p.id); setCategoryFilter('all') }}
+                  style={{ ...box, padding: '14px 16px', cursor: 'pointer', border: isActive ? '2px solid #6366f1' : '1px solid #e8e8e3', background: isActive ? '#6366f108' : '#fff', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 42, height: 42, borderRadius: 10, background: isActive ? '#6366f115' : '#fafaf8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                    📁
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{p.asin}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e' }}>{docCount}</span>
+                    <span style={{ fontSize: 10, color: '#9ca3af' }}>fichiers</span>
+                  </div>
+                </button>
               )
             })}
-          </tbody>
-        </table>
-        {filtered.length === 0 && (
-          <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>📁</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Aucun document</div>
-            <div style={{ fontSize: 13, color: '#9ca3af' }}>Centralisez vos factures, certificats et contrats ici</div>
+            {allProducts.length === 0 && (
+              <div style={{ ...box, padding: '40px 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>📁</div>
+                <div style={{ fontSize: 13, color: '#9ca3af' }}>Creez un dossier produit pour commencer</div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Main content — files inside selected folder */}
+        <div>
+          {!selectedProduct ? (
+            <div style={{ ...box, padding: '80px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 48, marginBottom: 14 }}>📂</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e', marginBottom: 6 }}>Selectionnez un dossier produit</div>
+              <div style={{ fontSize: 13, color: '#9ca3af', maxWidth: 380, margin: '0 auto' }}>
+                Choisissez un produit dans la liste a gauche pour voir et gerer ses documents (photos, videos, factures, certificats, etc.)
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: '#1a1a2e' }}>
+                  {allProducts.find(p => p.id === selectedProduct)?.name}
+                </div>
+                <div style={{ fontSize: 12, color: '#9ca3af', fontFamily: 'monospace' }}>
+                  {allProducts.find(p => p.id === selectedProduct)?.asin} · {productDocs.length} fichier{productDocs.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+
+              {/* Category grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8, marginBottom: 16 }}>
+                <button onClick={() => setCategoryFilter('all')}
+                  style={{ padding: '10px 8px', borderRadius: 10, border: `1px solid ${categoryFilter === 'all' ? '#6366f1' : '#e8e8e3'}`, background: categoryFilter === 'all' ? '#6366f115' : '#fff', color: categoryFilter === 'all' ? '#6366f1' : '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}>
+                  Tous ({productDocs.length})
+                </button>
+                {Object.entries(CATEGORIES).map(([type, cfg]) => {
+                  const count = productDocs.filter(d => d.type === type).length
+                  return (
+                    <button key={type} onClick={() => setCategoryFilter(type)}
+                      style={{ padding: '10px 8px', borderRadius: 10, border: `1px solid ${categoryFilter === type ? cfg.color : '#e8e8e3'}`, background: categoryFilter === type ? `${cfg.color}15` : '#fff', color: categoryFilter === type ? cfg.color : '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}>
+                      <span style={{ fontSize: 14 }}>{cfg.icon}</span> {cfg.label.split(' ')[0]} ({count})
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Documents list */}
+              <div style={{ ...box, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#fafaf8' }}>
+                      {['Fichier', 'Categorie', 'Notes', 'Date', ''].map(h => (
+                        <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDocs.map(doc => {
+                      const cfg = CATEGORIES[doc.type] || CATEGORIES.autre
+                      return (
+                        <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}>
+                          <td style={{ padding: '12px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{ width: 36, height: 36, borderRadius: 8, background: `${cfg.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                                {cfg.icon}
+                              </div>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{doc.name}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${cfg.color}15`, color: cfg.color, border: `1px solid ${cfg.color}30` }}>
+                              {cfg.label}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: 12, color: '#6b7280', maxWidth: 180 }}>
+                            {doc.notes || <span style={{ color: '#d1d5db' }}>-</span>}
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                            {doc.created_at ? formatDate(doc.created_at) : '-'}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <button onClick={() => handleDelete(doc.id)}
+                              style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                              Supprimer
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {filteredDocs.length === 0 && (
+                  <div style={{ padding: '50px 20px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 32, marginBottom: 10 }}>{categoryFilter !== 'all' ? (CATEGORIES[categoryFilter]?.icon || '📁') : '📂'}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>
+                      {categoryFilter !== 'all' ? `Aucun fichier "${CATEGORIES[categoryFilter]?.label}"` : 'Dossier vide'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                      Cliquez sur "+ Ajouter un fichier" pour commencer
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Ajouter un document">
+      {/* Modal — create folder */}
+      <Modal isOpen={showFolderForm} onClose={() => setShowFolderForm(false)} title="Creer un dossier produit">
+        <form onSubmit={createFolder}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Nom du produit *</label>
+            <input style={inp} type="text" placeholder="Ex: Kit Phare LED H7" value={folderForm.name} onChange={e => setFolderForm({ ...folderForm, name: e.target.value })} required />
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={lbl}>ASIN Amazon</label>
+            <input style={{ ...inp, fontFamily: 'monospace', textTransform: 'uppercase' }} type="text" maxLength={10} placeholder="B0XXXXXXXXX" value={folderForm.asin} onChange={e => setFolderForm({ ...folderForm, asin: e.target.value })} />
+          </div>
+          <button type="submit"
+            style={{ width: '100%', padding: '12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+            Creer le dossier
+          </button>
+        </form>
+      </Modal>
+
+      {/* Modal — add file */}
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Ajouter un fichier">
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Nom du document *</label>
-            <input style={inp} type="text" placeholder="Ex: Facture fournisseur #2024-001" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+            <label style={lbl}>Nom du fichier *</label>
+            <input style={inp} type="text" placeholder="Ex: Photo principale HD" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Type *</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-              {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
+            <label style={lbl}>Categorie *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+              {Object.entries(CATEGORIES).map(([type, cfg]) => (
                 <button key={type} type="button" onClick={() => setForm({ ...form, type })}
-                  style={{ padding: '10px 4px', borderRadius: 8, border: `1px solid ${form.type === type ? cfg.color : '#e8e8e3'}`, background: form.type === type ? `${cfg.color}15` : '#fafaf8', color: form.type === type ? cfg.color : '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}>
-                  <div style={{ fontSize: 18, marginBottom: 3 }}>{cfg.icon}</div>
-                  {cfg.label}
+                  style={{ padding: '10px 6px', borderRadius: 8, border: `1px solid ${form.type === type ? cfg.color : '#e8e8e3'}`, background: form.type === type ? `${cfg.color}15` : '#fafaf8', color: form.type === type ? cfg.color : '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}>
+                  <span style={{ fontSize: 16 }}>{cfg.icon}</span>
+                  <div style={{ marginTop: 2 }}>{cfg.label}</div>
                 </button>
               ))}
             </div>
           </div>
           <div style={{ marginBottom: 20 }}>
             <label style={lbl}>Notes</label>
-            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Informations complementaires..." />
+            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Description, details..." />
           </div>
           <button type="submit" disabled={saving}
             style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Ajout...' : 'Ajouter le document'}
+            {saving ? 'Ajout...' : 'Ajouter le fichier'}
           </button>
         </form>
       </Modal>

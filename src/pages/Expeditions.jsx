@@ -19,13 +19,25 @@ const STATUS = {
 
 const STEPS = ['production', 'transit', 'customs', 'warehouse', 'fba']
 
+const CARRIERS = {
+  dhl:      { name: 'DHL',       url: 'https://www.dhl.com/fr-fr/home/suivi.html?tracking-id=', color: '#FFCC00' },
+  fedex:    { name: 'FedEx',     url: 'https://www.fedex.com/fedextrack/?trknbr=', color: '#4D148C' },
+  ups:      { name: 'UPS',       url: 'https://www.ups.com/track?tracknum=', color: '#351C15' },
+  tnt:      { name: 'TNT',       url: 'https://www.tnt.com/express/fr_fr/site/outils-expedition/suivi.html?searchType=con&cons=', color: '#FF6600' },
+  dpd:      { name: 'DPD',       url: 'https://trace.dpd.fr/fr/trace/', color: '#DC0032' },
+  cma:      { name: 'CMA CGM',   url: 'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=ContainerNumber&Reference=', color: '#002B5C' },
+  maersk:   { name: 'Maersk',    url: 'https://www.maersk.com/tracking/', color: '#003B5C' },
+  msc:      { name: 'MSC',       url: 'https://www.msc.com/track-a-shipment?agencyPath=fr&trackingNumber=', color: '#002244' },
+  other:    { name: 'Autre',     url: 'https://www.17track.net/fr/track?nums=', color: '#6b7280' },
+}
+
 const mockShipments = [
-  { id: 'm1', reference: 'EXP-2024-001', origin: 'Shenzhen, Chine', destination: 'Amazon FBA FR', status: 'transit', carrier: 'DHL', eta: '2024-05-20', items: 500 },
-  { id: 'm2', reference: 'EXP-2024-002', origin: 'Guangzhou, Chine', destination: 'Amazon FBA DE', status: 'customs', carrier: 'FedEx', eta: '2024-05-18', items: 300 },
-  { id: 'm3', reference: 'EXP-2024-003', origin: 'Istanbul, Turquie', destination: 'Amazon FBA FR', status: 'fba', carrier: 'TNT', eta: '2024-05-10', items: 200 },
+  { id: 'm1', reference: 'EXP-2024-001', origin: 'Shenzhen, Chine', destination: 'Amazon FBA FR', status: 'transit', carrier: 'dhl', tracking_number: '1234567890', eta: '2024-05-20', items: 500 },
+  { id: 'm2', reference: 'EXP-2024-002', origin: 'Guangzhou, Chine', destination: 'Amazon FBA DE', status: 'customs', carrier: 'fedex', tracking_number: '9876543210', eta: '2024-05-18', items: 300 },
+  { id: 'm3', reference: 'EXP-2024-003', origin: 'Istanbul, Turquie', destination: 'Amazon FBA FR', status: 'fba', carrier: 'cma', tracking_number: 'CMAU1234567', eta: '2024-05-10', items: 200 },
 ]
 
-const emptyForm = { reference: '', origin: '', destination: '', carrier: '', items: '', status: 'transit', eta: '' }
+const emptyForm = { reference: '', origin: '', destination: '', carrier: 'dhl', items: '', status: 'transit', eta: '', tracking_number: '' }
 
 function ProgressSteps({ status }) {
   const currentIdx = STEPS.indexOf(status)
@@ -55,6 +67,24 @@ function ProgressSteps({ status }) {
   )
 }
 
+function TrackingBadge({ carrier, tracking }) {
+  if (!tracking) return <span style={{ fontSize: 12, color: '#9ca3af' }}>Aucun suivi</span>
+  const c = CARRIERS[carrier] || CARRIERS.other
+  const trackUrl = c.url + encodeURIComponent(tracking)
+  return (
+    <a href={trackUrl} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 8, textDecoration: 'none', cursor: 'pointer' }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', fontFamily: 'monospace' }}>{tracking}</span>
+      <span style={{ fontSize: 10, color: '#6b7280' }}>({c.name})</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
+        <polyline points="15 3 21 3 21 9"/>
+        <line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+    </a>
+  )
+}
+
 export default function Expeditions() {
   const { user } = useStore()
   const [shipments, setShipments] = useState([])
@@ -63,6 +93,8 @@ export default function Expeditions() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [useMock, setUseMock] = useState(false)
+  const [editingTracking, setEditingTracking] = useState(null)
+  const [trackingInput, setTrackingInput] = useState('')
 
   useEffect(() => { if (user) loadData() }, [user])
 
@@ -91,7 +123,7 @@ export default function Expeditions() {
       eta: form.eta || null,
     }
     if (useMock) {
-      setShipments(prev => [...prev, { ...shipmentData, id: `m${Date.now()}` }])
+      setShipments(prev => [...prev, { ...shipmentData, id: `m${Date.now()}`, tracking_number: form.tracking_number || null }])
     } else {
       await addShipment(user.id, shipmentData)
       await loadData()
@@ -120,10 +152,21 @@ export default function Expeditions() {
     }
   }
 
+  const saveTracking = async (id) => {
+    if (useMock || String(id).startsWith('m')) {
+      setShipments(prev => prev.map(s => s.id === id ? { ...s, tracking_number: trackingInput } : s))
+    } else {
+      await updateShipment(id, { tracking_number: trackingInput })
+      loadData()
+    }
+    setEditingTracking(null)
+  }
+
   const inTransit = shipments.filter(s => s.status === 'transit' || s.status === 'customs' || s.status === 'production').length
   const inCustoms = shipments.filter(s => s.status === 'customs').length
   const delivered = shipments.filter(s => s.status === 'delivered' || s.status === 'fba').length
   const totalItems = shipments.filter(s => s.status !== 'delivered' && s.status !== 'fba').reduce((a, s) => a + (s.items || 0), 0)
+  const withTracking = shipments.filter(s => s.tracking_number).length
 
   if (loading) return <Loading />
 
@@ -155,7 +198,7 @@ export default function Expeditions() {
           { label: 'En cours', value: inTransit, icon: '🚢', color: '#3b82f6', sub: 'En route vers FBA' },
           { label: 'En douane', value: inCustoms, icon: '🛃', color: inCustoms > 0 ? '#f59e0b' : '#10b981', sub: inCustoms > 0 ? 'Attention requise' : 'Aucun blocage' },
           { label: 'Livrees', value: delivered, icon: '✅', color: '#10b981', sub: 'Dans les entrepots' },
-          { label: 'Unites en transit', value: totalItems.toLocaleString(), icon: '📦', color: '#6366f1', sub: 'Unites en chemin' },
+          { label: 'Unites en transit', value: totalItems.toLocaleString(), icon: '📦', color: '#6366f1', sub: `${withTracking} avec suivi` },
         ].map(k => (
           <div key={k.label} style={{ ...box, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -173,6 +216,7 @@ export default function Expeditions() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {shipments.map(s => {
           const st = STATUS[s.status] || STATUS.transit
+          const carrierInfo = CARRIERS[s.carrier] || CARRIERS.other
           return (
             <div key={s.id} style={{ ...box, padding: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -183,7 +227,7 @@ export default function Expeditions() {
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', fontFamily: 'monospace' }}>{s.reference}</div>
                     <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                      {s.origin} → {s.destination} · {s.carrier} · <strong>{s.items} unites</strong>
+                      {s.origin} → {s.destination} · {carrierInfo.name} · <strong>{s.items} unites</strong>
                     </div>
                   </div>
                 </div>
@@ -201,6 +245,35 @@ export default function Expeditions() {
                     style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>✕</button>
                 </div>
               </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, padding: '10px 14px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', whiteSpace: 'nowrap' }}>N° suivi :</span>
+                {editingTracking === s.id ? (
+                  <div style={{ display: 'flex', gap: 6, flex: 1 }}>
+                    <input style={{ ...inp, flex: 1, fontFamily: 'monospace' }} type="text" value={trackingInput}
+                      onChange={e => setTrackingInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && saveTracking(s.id)}
+                      placeholder="Ex: 1234567890, CMAU1234567..." autoFocus />
+                    <button onClick={() => saveTracking(s.id)}
+                      style={{ padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      Sauver
+                    </button>
+                    <button onClick={() => setEditingTracking(null)}
+                      style={{ padding: '6px 10px', background: '#f0f0eb', color: '#6b7280', border: 'none', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <TrackingBadge carrier={s.carrier} tracking={s.tracking_number} />
+                    <button onClick={() => { setEditingTracking(s.id); setTrackingInput(s.tracking_number || '') }}
+                      style={{ padding: '4px 10px', background: 'none', border: '1px solid #e8e8e3', borderRadius: 6, fontSize: 11, color: '#6b7280', cursor: 'pointer', fontWeight: 600 }}>
+                      {s.tracking_number ? '✏️ Modifier' : '+ Ajouter'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <ProgressSteps status={s.status} />
             </div>
           )
@@ -214,6 +287,13 @@ export default function Expeditions() {
         )}
       </div>
 
+      <div style={{ marginTop: 14, padding: '14px 18px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>💡 Suivi en temps reel</div>
+        <div style={{ fontSize: 12, color: '#1e3a5f' }}>
+          Renseignez votre numero de suivi et cliquez dessus pour etre redirige vers le site du transporteur (DHL, FedEx, UPS, CMA CGM, Maersk, MSC, etc.) et voir le statut en temps reel de votre expedition.
+        </div>
+      </div>
+
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle expedition">
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -223,8 +303,14 @@ export default function Expeditions() {
             </div>
             <div>
               <label style={lbl}>Transporteur *</label>
-              <input style={inp} type="text" placeholder="DHL, FedEx, TNT..." value={form.carrier} onChange={e => setForm({ ...form, carrier: e.target.value })} required />
+              <select style={inp} value={form.carrier} onChange={e => setForm({ ...form, carrier: e.target.value })}>
+                {Object.entries(CARRIERS).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}
+              </select>
             </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Numero de suivi</label>
+            <input style={{ ...inp, fontFamily: 'monospace' }} type="text" placeholder="Ex: 1234567890, CMAU1234567..." value={form.tracking_number} onChange={e => setForm({ ...form, tracking_number: e.target.value })} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>

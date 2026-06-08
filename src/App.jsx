@@ -13,7 +13,6 @@ import Expeditions from './pages/Expeditions'
 import Stock from './pages/Stock'
 import QualiteSAV from './pages/QualiteSAV'
 import Documents from './pages/Documents'
-import Comptabilite from './pages/Comptabilite'
 import Parametres from './pages/Parametres'
 import NotFound from './pages/NotFound'
 import Loading from './components/Loading'
@@ -48,7 +47,6 @@ function App() {
           <Route path="/stock" element={<Stock />} />
           <Route path="/qualite-sav" element={<QualiteSAV />} />
           <Route path="/documents" element={<Documents />} />
-          <Route path="/comptabilite" element={<Comptabilite />} />
           <Route path="/parametres" element={<Parametres />} />
           <Route path="*" element={<NotFound />} />
         </Route>
