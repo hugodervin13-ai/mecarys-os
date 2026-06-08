@@ -10,12 +10,15 @@ const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border:
 const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
 
 const STATUS = {
-  pending:    { label: 'En attente',   color: '#f59e0b', bg: '#fef3c715' },
-  production: { label: 'Production',   color: '#6366f1', bg: '#6366f115' },
-  shipped:    { label: 'Expediee',     color: '#3b82f6', bg: '#3b82f615' },
-  transit:    { label: 'En transit',   color: '#3b82f6', bg: '#3b82f615' },
-  delivered:  { label: 'Livree',       color: '#10b981', bg: '#10b98115' },
-  cancelled:  { label: 'Annulee',      color: '#9ca3af', bg: '#9ca3af15' },
+  pending:       { label: 'En attente',         color: '#f59e0b', bg: '#fef3c715', icon: '⏳' },
+  production:    { label: 'Production',         color: '#6366f1', bg: '#6366f115', icon: '🏭' },
+  shipped:       { label: 'Expediee',           color: '#3b82f6', bg: '#3b82f615', icon: '📤' },
+  transit_boat:  { label: 'Transit bateau',     color: '#0ea5e9', bg: '#0ea5e915', icon: '🚢' },
+  transit_truck: { label: 'Transit camion',     color: '#3b82f6', bg: '#3b82f615', icon: '🚛' },
+  transit:       { label: 'En transit (autre)',  color: '#3b82f6', bg: '#3b82f615', icon: '✈️' },
+  customs:       { label: 'En douane',          color: '#f97316', bg: '#f9731615', icon: '🛃' },
+  delivered:     { label: 'Livree',             color: '#10b981', bg: '#10b98115', icon: '✅' },
+  cancelled:     { label: 'Annulee',            color: '#9ca3af', bg: '#9ca3af15', icon: '❌' },
 }
 
 const emptyForm = { order_number: '', supplier: '', product_id: '', quantity: '', cost_total: '', expected_delivery: '', status: 'pending' }
@@ -71,7 +74,7 @@ export default function Commandes() {
 
   const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.status === filterStatus)
   const pending = orders.filter(o => o.status === 'pending').length
-  const transit = orders.filter(o => o.status === 'transit' || o.status === 'shipped').length
+  const transit = orders.filter(o => ['transit', 'transit_boat', 'transit_truck', 'shipped', 'customs'].includes(o.status)).length
   const totalAmount = orders.reduce((a, o) => a + (o.cost_total || 0), 0)
 
   if (loading) return <Loading />
@@ -142,7 +145,7 @@ export default function Commandes() {
                   <td style={{ padding: '12px 16px' }}>
                     <select value={order.status} onChange={e => handleStatusChange(order.id, e.target.value)}
                       style={{ padding: '4px 10px', borderRadius: 20, border: `1px solid ${s.color}40`, background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
-                      {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
                     </select>
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#6b7280' }}>
@@ -203,7 +206,7 @@ export default function Commandes() {
             <div>
               <label style={lbl}>Statut initial</label>
               <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-                {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
               </select>
             </div>
             <div>
