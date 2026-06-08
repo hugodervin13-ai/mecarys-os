@@ -4,24 +4,37 @@ import { useStore } from '../lib/store'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 
+const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
+const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
+const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
+
+const COUNTRY_FLAGS = {
+  'Chine': '🇨🇳', 'China': '🇨🇳',
+  'Inde': '🇮🇳', 'India': '🇮🇳',
+  'Turquie': '🇹🇷', 'Turkey': '🇹🇷',
+  'Vietnam': '🇻🇳',
+  'Bangladesh': '🇧🇩',
+  'France': '🇫🇷',
+  'Allemagne': '🇩🇪', 'Germany': '🇩🇪',
+}
+
+const mockSuppliers = [
+  { id: 'm1', name: 'Shenzhen Electronics Co.', country: 'Chine', contact_email: 'contact@shenzhen-elec.com', phone: '+86 755 1234 5678', status: 'active', created_at: '2024-04-15' },
+  { id: 'm2', name: 'Guangzhou Trading Ltd.', country: 'Chine', contact_email: 'sales@gz-trading.com', phone: '+86 20 8765 4321', status: 'active', created_at: '2024-03-20' },
+  { id: 'm3', name: 'Istanbul Packaging', country: 'Turquie', contact_email: 'info@ist-pack.com', phone: '+90 212 555 0000', status: 'inactive', created_at: '2024-01-10' },
+]
+
 export default function Fournisseurs() {
   const { user } = useStore()
   const [suppliers, setSuppliers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [filterStatus, setFilterStatus] = useState('all')
   const [form, setForm] = useState({ name: '', country: '', contact_email: '', phone: '', status: 'active' })
   const [useMock, setUseMock] = useState(false)
 
-  const mockSuppliers = [
-    { id: 'm1', name: 'Shenzhen Electronics Co.', country: 'Chine', contact_email: 'contact@shenzhen-elec.com', status: 'active', created_at: '2024-04-15' },
-    { id: 'm2', name: 'Guangzhou Trading Ltd.', country: 'Chine', contact_email: 'sales@gz-trading.com', status: 'active', created_at: '2024-03-20' },
-    { id: 'm3', name: 'Istanbul Packaging', country: 'Turquie', contact_email: 'info@ist-pack.com', status: 'inactive', created_at: '2024-01-10' },
-  ]
-
-  useEffect(() => {
-    if (user) loadData()
-  }, [user])
+  useEffect(() => { if (user) loadData() }, [user])
 
   const loadData = async () => {
     const { data, error } = await getSuppliers(user.id)
@@ -59,97 +72,134 @@ export default function Fournisseurs() {
     }
   }
 
+  const filtered = filterStatus === 'all' ? suppliers : suppliers.filter(s => s.status === filterStatus)
+  const active = suppliers.filter(s => s.status === 'active').length
+  const countries = new Set(suppliers.map(s => s.country)).size
+
   if (loading) return <Loading />
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-[#1a1a2e]">Fournisseurs</h1>
-        <button onClick={() => setShowForm(true)} className="bg-[#6366f1] hover:bg-[#4f46e5] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Fournisseurs</h1>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Gerez votre carnet de fournisseurs et leurs coordonnees</p>
+        </div>
+        <button onClick={() => setShowForm(true)}
+          style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           + Ajouter un fournisseur
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Total fournisseurs</p>
-          <p className="text-2xl font-bold text-[#1a1a2e] mt-1">{suppliers.length}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Actifs</p>
-          <p className="text-2xl font-bold text-[#10b981] mt-1">{suppliers.filter(s => s.status === 'active').length}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Pays</p>
-          <p className="text-2xl font-bold text-[#1a1a2e] mt-1">{new Set(suppliers.map(s => s.country)).size}</p>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
+        {[
+          { label: 'Total fournisseurs', value: suppliers.length, icon: '🏭', color: '#6366f1', sub: 'Dans votre carnet' },
+          { label: 'Fournisseurs actifs', value: active, icon: '✅', color: '#10b981', sub: 'En activite' },
+          { label: 'Inactifs', value: suppliers.length - active, icon: '💤', color: '#9ca3af', sub: 'Archive' },
+          { label: 'Pays', value: countries, icon: '🌍', color: '#3b82f6', sub: 'Diversification' },
+        ].map(k => (
+          <div key={k.label} style={{ ...box, padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{k.label}</p>
+                <p style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e' }}>{k.value}</p>
+                <p style={{ fontSize: 11, color: k.color, marginTop: 4, fontWeight: 500 }}>{k.sub}</p>
+              </div>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-[#e8e8e3] overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-[#fafaf8]">
-            <tr>
-              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Nom</th>
-              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Pays</th>
-              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Contact</th>
-              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Statut</th>
-              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {suppliers.map((s) => (
-              <tr key={s.id} className="border-t border-[#e8e8e3] hover:bg-[#f5f5f0]">
-                <td className="px-6 py-4 text-[#1a1a2e] text-sm font-medium">{s.name}</td>
-                <td className="px-6 py-4 text-[#6b7280] text-sm">{s.country}</td>
-                <td className="px-6 py-4 text-[#3b82f6] text-sm">{s.contact_email}</td>
-                <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded-full text-xs ${s.status === 'active' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-[#9ca3af]/10 text-[#6b7280]'}`}>
-                    {s.status === 'active' ? 'Actif' : 'Inactif'}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <button onClick={() => handleDelete(s.id)} className="text-[#ef4444] hover:text-red-300 text-sm">Supprimer</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {suppliers.length === 0 && (
-          <div className="p-12 text-center text-[#6b7280]">Aucun fournisseur. Ajoutez-en un pour commencer.</div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        {[['all', `Tous (${suppliers.length})`], ['active', `✅ Actifs (${active})`], ['inactive', `💤 Inactifs (${suppliers.length - active})`]].map(([val, label]) => (
+          <button key={val} onClick={() => setFilterStatus(val)}
+            style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${filterStatus === val ? '#6366f1' : '#e8e8e3'}`, background: filterStatus === val ? '#6366f1' : '#fff', color: filterStatus === val ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+        {filtered.map(s => (
+          <div key={s.id} style={{ ...box, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 46, height: 46, borderRadius: 12, background: '#6366f115', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+                  {COUNTRY_FLAGS[s.country] || '🏭'}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e' }}>{s.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{s.country}</div>
+                </div>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: s.status === 'active' ? '#10b98115' : '#9ca3af15', color: s.status === 'active' ? '#10b981' : '#9ca3af', border: `1px solid ${s.status === 'active' ? '#10b98130' : '#9ca3af30'}` }}>
+                {s.status === 'active' ? 'Actif' : 'Inactif'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14, borderTop: '1px solid #f0f0eb' }}>
+              {s.contact_email && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>✉️</span>
+                  <a href={`mailto:${s.contact_email}`} style={{ fontSize: 12, color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>{s.contact_email}</a>
+                </div>
+              )}
+              {s.phone && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>📞</span>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>{s.phone}</span>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+              <button onClick={() => handleDelete(s.id)}
+                style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                Supprimer
+              </button>
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', ...box, padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🏭</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Aucun fournisseur</div>
+            <div style={{ fontSize: 13, color: '#9ca3af' }}>Ajoutez vos fournisseurs pour centraliser leurs coordonnees</div>
+          </div>
         )}
       </div>
 
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau fournisseur">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[#6b7280] text-sm mb-1">Nom *</label>
-            <input type="text" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Nom du fournisseur *</label>
+            <input style={inp} type="text" placeholder="Ex: Shenzhen Electronics Co." value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Pays *</label>
-              <input type="text" value={form.country} onChange={(e) => setForm({...form, country: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
+              <label style={lbl}>Pays *</label>
+              <input style={inp} type="text" placeholder="Ex: Chine" value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} required />
             </div>
             <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Contact email *</label>
-              <input type="email" value={form.contact_email} onChange={(e) => setForm({...form, contact_email: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Telephone</label>
-              <input type="text" value={form.phone} onChange={(e) => setForm({...form, phone: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Statut</label>
-              <select value={form.status} onChange={(e) => setForm({...form, status: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm">
+              <label style={lbl}>Statut</label>
+              <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
                 <option value="active">Actif</option>
                 <option value="inactive">Inactif</option>
               </select>
             </div>
           </div>
-          <button type="submit" disabled={saving} className="w-full bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition-colors">
-            {saving ? 'Ajout...' : 'Ajouter'}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+            <div>
+              <label style={lbl}>Email de contact *</label>
+              <input style={inp} type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} required />
+            </div>
+            <div>
+              <label style={lbl}>Telephone</label>
+              <input style={inp} type="text" placeholder="+86 755 ..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+            </div>
+          </div>
+          <button type="submit" disabled={saving}
+            style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Ajout...' : 'Ajouter le fournisseur'}
           </button>
         </form>
       </Modal>
