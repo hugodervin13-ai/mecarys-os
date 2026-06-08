@@ -2,23 +2,6 @@
 
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --color-primary: #5a2d82;
-  --color-primary-hover: #6b3d92;
-  --color-primary-light: #7c4daa;
-  --color-secondary: #00d4ff;
-  --color-bg: #0f1419;
-  --color-surface: #1a1f2e;
-  --color-surface-hover: #232a3b;
-  --color-border: #2d3748;
-  --color-border-light: #3d4758;
-  --color-text: #ffffff;
-  --color-text-secondary: #8b95a5;
-  --color-text-muted: #636d7e;
-  --color-success: #10b981;
-  --color-success-dark: #059669;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
-  --color-info: #3b82f6;
 }
 
 * {
@@ -32,9 +15,9 @@ html {
 }
 
 body {
-  background-color: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-sans);
+  background-color: #0f1419;
+  color: #ffffff;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
