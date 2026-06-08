@@ -4,11 +4,11 @@ import Header from './Header'
 
 export default function Layout() {
   return (
-    <div className="flex bg-[#0f1419] text-white min-h-screen">
+    <div className="flex bg-bg text-white min-h-screen">
       <Sidebar />
-      <div className="ml-64 flex-1 flex flex-col">
+      <div className="ml-[240px] flex-1 flex flex-col min-h-screen">
         <Header />
-        <main className="flex-1 p-8 overflow-y-auto">
+        <main className="flex-1 px-6 py-5 overflow-y-auto">
           <Outlet />
         </main>
       </div>
