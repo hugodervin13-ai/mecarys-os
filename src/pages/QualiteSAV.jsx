@@ -1,105 +1,207 @@
 import { useState } from 'react'
 
+const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
+
 const mockReviews = [
-  { id: 1, asin: 'B08N5WRWNW', rating: 2, text: "Produit conforme mais l'emballage etait abime.", date: '2024-05-12', status: 'pending' },
-  { id: 2, asin: 'B09X1ZZKZL', rating: 1, text: "Ne fonctionne pas apres 2 semaines d'utilisation.", date: '2024-05-10', status: 'resolved' },
-  { id: 3, asin: 'B08N5WRWNW', rating: 3, text: 'Correct mais la qualite a baisse par rapport a ma premiere commande.', date: '2024-05-08', status: 'pending' }
+  { id: 1, asin: 'B08N5WRWNW', product: 'Kit Phare LED H7', rating: 2, text: "Produit conforme mais l'emballage etait abime a la reception. Le produit fonctionne mais l'impression est mauvaise.", date: '2024-05-12', status: 'pending' },
+  { id: 2, asin: 'B09X1ZZKZL', product: 'Ampoule LED H4', rating: 1, text: "Ne fonctionne pas apres seulement 2 semaines d'utilisation. Qualite tres decevante, ne pas acheter.", date: '2024-05-10', status: 'resolved' },
+  { id: 3, asin: 'B08N5WRWNW', product: 'Kit Phare LED H7', rating: 3, text: 'Correct mais la qualite a clairement baisse par rapport a ma premiere commande il y a 6 mois.', date: '2024-05-08', status: 'pending' },
+  { id: 4, asin: 'B07XKZZKZL', product: 'Support telephone voiture', rating: 2, text: "La fixation lache apres quelques jours d'utilisation. Tres decu.", date: '2024-05-06', status: 'pending' },
 ]
 
 const mockReturns = [
-  { id: 1, asin: 'B08N5WRWNW', reason: 'Defectueux', quantity: 3, date: '2024-05-11', cost: 84 },
-  { id: 2, asin: 'B09X1ZZKZL', reason: 'Non conforme', quantity: 1, date: '2024-05-09', cost: 30 }
+  { id: 1, asin: 'B08N5WRWNW', product: 'Kit Phare LED H7', reason: 'Defectueux', quantity: 3, date: '2024-05-11', cost: 84, impact: 'high' },
+  { id: 2, asin: 'B09X1ZZKZL', product: 'Ampoule LED H4', reason: 'Non conforme a la description', quantity: 1, date: '2024-05-09', cost: 30, impact: 'medium' },
+  { id: 3, asin: 'B07XKZZKZL', product: 'Support telephone', reason: 'Ne repond pas aux attentes', quantity: 2, date: '2024-05-07', cost: 48, impact: 'low' },
+  { id: 4, asin: 'B08N5WRWNW', product: 'Kit Phare LED H7', reason: 'Emballage endommage', quantity: 1, date: '2024-05-05', cost: 28, impact: 'low' },
 ]
+
+const TEMPLATES = {
+  1: "Bonjour, nous vous presentons nos sinceres excuses pour cette experience negative. La qualite de nos produits est notre priorite. Nous vous proposons un remboursement integral ou un remplacement immediat. Merci de nous contacter en message prive.",
+  2: "Bonjour, nous sommes vraiment desoles que notre produit ne soit pas a la hauteur de vos attentes. Votre satisfaction est essentielle. Nous prenons ce retour tres au serieux pour ameliorer notre qualite.",
+  3: "Bonjour, merci pour votre retour. Nous avons pris note de votre remarque et travaillons activement a ameliorer notre qualite. N'hesitez pas a nous contacter directement pour que nous puissions vous aider.",
+}
+
+function Stars({ rating }) {
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {[1, 2, 3, 4, 5].map(s => (
+        <span key={s} style={{ fontSize: 13, color: s <= rating ? '#f59e0b' : '#e5e7eb' }}>★</span>
+      ))}
+    </div>
+  )
+}
 
 export default function QualiteSAV() {
   const [tab, setTab] = useState('reviews')
+  const [reviews, setReviews] = useState(mockReviews)
+  const [returns] = useState(mockReturns)
+  const [showTemplate, setShowTemplate] = useState(null)
+
+  const markResolved = (id) => setReviews(prev => prev.map(r => r.id === id ? { ...r, status: 'resolved' } : r))
+  const pending = reviews.filter(r => r.status === 'pending')
+  const totalReturnCost = returns.reduce((a, r) => a + r.cost, 0)
+  const returnRate = 2.3
+
+  const impactColor = { high: '#ef4444', medium: '#f59e0b', low: '#10b981' }
+  const impactLabel = { high: 'Eleve', medium: 'Moyen', low: 'Faible' }
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-[#1a1a2e] mb-6">Qualite & SAV</h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Avis negatifs (30j)</p>
-          <p className="text-2xl font-bold text-[#ef4444] mt-1">{mockReviews.length}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Retours (30j)</p>
-          <p className="text-2xl font-bold text-[#f59e0b] mt-1">{mockReturns.length}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Taux de retour</p>
-          <p className="text-2xl font-bold text-[#1a1a2e] mt-1">2.3%</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-          <p className="text-[#6b7280] text-sm">Cout des retours</p>
-          <p className="text-2xl font-bold text-[#ef4444] mt-1">{mockReturns.reduce((a, r) => a + r.cost, 0)} &euro;</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Qualite & SAV</h1>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Surveillez vos avis negatifs et gerez vos retours pour proteger votre BSR</p>
         </div>
       </div>
 
-      <div className="flex gap-4 mb-6">
-        <button
-          onClick={() => setTab('reviews')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'reviews' ? 'bg-[#6366f1] text-white' : 'text-[#6b7280] hover:text-[#1a1a2e]'}`}
-        >
-          Avis negatifs
-        </button>
-        <button
-          onClick={() => setTab('returns')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'returns' ? 'bg-[#6366f1] text-white' : 'text-[#6b7280] hover:text-[#1a1a2e]'}`}
-        >
-          Retours
-        </button>
+      {pending.length > 0 && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 20 }}>⚠️</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>{pending.length} avis negatif{pending.length > 1 ? 's' : ''} en attente de traitement</div>
+            <div style={{ fontSize: 12, color: '#ef4444', marginTop: 2 }}>Les avis negatifs non traites impactent directement votre taux de conversion et votre BSR</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
+        {[
+          { label: 'Avis negatifs (30j)', value: reviews.length, icon: '💬', color: '#ef4444', sub: `${pending.length} a traiter` },
+          { label: 'Retours (30j)', value: returns.length, icon: '↩️', color: '#f59e0b', sub: `${returnRate}% de taux de retour` },
+          { label: 'Taux de retour', value: `${returnRate}%`, icon: '📉', color: returnRate > 5 ? '#ef4444' : returnRate > 2 ? '#f59e0b' : '#10b981', sub: returnRate > 5 ? 'Risque suspension' : returnRate > 2 ? 'A surveiller' : 'Niveau normal' },
+          { label: 'Cout des retours', value: `${totalReturnCost} €`, icon: '💸', color: '#ef4444', sub: 'Sur 30 jours' },
+        ].map(k => (
+          <div key={k.label} style={{ ...box, padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{k.label}</p>
+                <p style={{ fontSize: 22, fontWeight: 700, color: k.color }}>{k.value}</p>
+                <p style={{ fontSize: 11, color: k.color, marginTop: 4, fontWeight: 500 }}>{k.sub}</p>
+              </div>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+        {[['reviews', `💬 Avis negatifs (${reviews.length})`], ['returns', `↩️ Retours (${returns.length})`]].map(([val, label]) => (
+          <button key={val} onClick={() => setTab(val)}
+            style={{ padding: '7px 18px', borderRadius: 8, border: `1px solid ${tab === val ? '#6366f1' : '#e8e8e3'}`, background: tab === val ? '#6366f1' : '#fff', color: tab === val ? '#fff' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
       </div>
 
       {tab === 'reviews' && (
-        <div className="space-y-4">
-          {mockReviews.map((review) => (
-            <div key={review.id} className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex">
-                    {[1,2,3,4,5].map(s => (
-                      <span key={s} className={`text-sm ${s <= review.rating ? 'text-[#f59e0b]' : 'text-[#d1d5db]'}`}>★</span>
-                    ))}
-                  </div>
-                  <span className="text-[#6b7280] text-xs">{review.asin}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {reviews.map(r => (
+            <div key={r.id} style={{ ...box, padding: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Stars rating={r.rating} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a2e' }}>{r.product}</span>
+                  <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{r.asin}</span>
                 </div>
-                <span className={`px-2 py-1 rounded-full text-xs ${review.status === 'resolved' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-[#f59e0b]/20 text-[#f59e0b]'}`}>
-                  {review.status === 'resolved' ? 'Resolu' : 'A traiter'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>{r.date}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: r.status === 'resolved' ? '#10b98115' : '#f59e0b15', color: r.status === 'resolved' ? '#10b981' : '#f59e0b', border: `1px solid ${r.status === 'resolved' ? '#10b98130' : '#f59e0b30'}` }}>
+                    {r.status === 'resolved' ? '✓ Traite' : 'A traiter'}
+                  </span>
+                </div>
               </div>
-              <p className="text-[#1a1a2e] text-sm mb-2">{review.text}</p>
-              <p className="text-[#6b7280] text-xs">{review.date}</p>
+              <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14, padding: '10px 14px', background: '#fafaf8', borderRadius: 8, borderLeft: '3px solid #e8e8e3' }}>"{r.text}"</p>
+              {r.status === 'pending' && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setShowTemplate(showTemplate === r.id ? null : r.id)}
+                    style={{ padding: '7px 14px', borderRadius: 8, background: '#6366f115', border: '1px solid #6366f130', color: '#6366f1', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    📝 Voir modele reponse
+                  </button>
+                  <button onClick={() => markResolved(r.id)}
+                    style={{ padding: '7px 14px', borderRadius: 8, background: '#10b98115', border: '1px solid #10b98130', color: '#10b981', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    ✓ Marquer comme traite
+                  </button>
+                  <a href={`https://www.amazon.fr/dp/${r.asin}`} target="_blank" rel="noopener noreferrer"
+                    style={{ padding: '7px 14px', borderRadius: 8, background: '#f0f0eb', border: '1px solid #e8e8e3', color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'none' }}>
+                    🔗 Voir sur Amazon
+                  </a>
+                </div>
+              )}
+              {showTemplate === r.id && (
+                <div style={{ marginTop: 12, padding: '12px 14px', background: '#f0f7ff', borderRadius: 8, border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#3b82f6', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Modele de reponse</div>
+                  <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{TEMPLATES[r.id] || TEMPLATES[1]}</p>
+                  <button onClick={() => navigator.clipboard?.writeText(TEMPLATES[r.id] || TEMPLATES[1])}
+                    style={{ marginTop: 8, padding: '5px 12px', borderRadius: 6, background: '#3b82f6', color: '#fff', border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                    Copier
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
       {tab === 'returns' && (
-        <div className="bg-white rounded-xl border border-[#e8e8e3] overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-[#fafaf8]">
-              <tr>
-                <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">ASIN</th>
-                <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Raison</th>
-                <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Quantite</th>
-                <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Cout</th>
-                <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mockReturns.map((r) => (
-                <tr key={r.id} className="border-t border-[#e8e8e3] hover:bg-[#f5f5f0]">
-                  <td className="px-6 py-4 text-[#1a1a2e] text-sm font-mono">{r.asin}</td>
-                  <td className="px-6 py-4 text-[#1a1a2e] text-sm">{r.reason}</td>
-                  <td className="px-6 py-4 text-[#1a1a2e] text-sm">{r.quantity}</td>
-                  <td className="px-6 py-4 text-[#ef4444] text-sm">{r.cost} &euro;</td>
-                  <td className="px-6 py-4 text-[#6b7280] text-sm">{r.date}</td>
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
+            {[
+              ['Defectueux', returns.filter(r => r.reason === 'Defectueux').length, '#ef4444'],
+              ['Non conforme', returns.filter(r => r.reason.includes('conforme')).length, '#f59e0b'],
+              ['Autres raisons', returns.filter(r => !r.reason.includes('Defectueux') && !r.reason.includes('conforme')).length, '#6366f1'],
+            ].map(([label, count, color]) => (
+              <div key={label} style={{ ...box, padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 20 }}>📦</span>
+                </div>
+                <div>
+                  <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>{label}</p>
+                  <p style={{ fontSize: 22, fontWeight: 700, color }}>{count}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ ...box, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#fafaf8' }}>
+                  {['Produit', 'Raison du retour', 'Quantite', 'Cout', 'Impact', 'Date'].map(h => (
+                    <th key={h} style={{ padding: '10px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {returns.map(r => (
+                  <tr key={r.id} style={{ borderTop: '1px solid #f0f0eb' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
+                    onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <td style={{ padding: '12px 18px' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{r.product}</div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{r.asin}</div>
+                    </td>
+                    <td style={{ padding: '12px 18px', fontSize: 13, color: '#374151' }}>{r.reason}</td>
+                    <td style={{ padding: '12px 18px', fontSize: 14, fontWeight: 700, color: '#1a1a2e' }}>{r.quantity}</td>
+                    <td style={{ padding: '12px 18px', fontSize: 14, fontWeight: 700, color: '#ef4444' }}>{r.cost} €</td>
+                    <td style={{ padding: '12px 18px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: `${impactColor[r.impact]}15`, color: impactColor[r.impact], border: `1px solid ${impactColor[r.impact]}30` }}>
+                        {impactLabel[r.impact]}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 18px', fontSize: 12, color: '#9ca3af' }}>{r.date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ marginTop: 14, padding: '14px 18px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>💡 Conseil FBA expert</div>
+            <div style={{ fontSize: 12, color: '#78350f' }}>
+              Un taux de retour superieur a 8% sur Amazon peut entrainer une suspension de votre compte. Analysez les raisons recurrentes et contactez votre fournisseur pour ameliorer la qualite produit et l'emballage.
+            </div>
+          </div>
         </div>
       )}
     </div>

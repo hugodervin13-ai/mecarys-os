@@ -107,3 +107,64 @@ CREATE POLICY "Users can delete own alerts" ON alerts FOR DELETE USING (auth.uid
 CREATE POLICY "Users can view own settings" ON settings FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own settings" ON settings FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own settings" ON settings FOR UPDATE USING (auth.uid() = user_id);
+
+-- =============================================
+-- NEW TABLES (v2)
+-- =============================================
+
+-- Suppliers (Fournisseurs)
+CREATE TABLE IF NOT EXISTS suppliers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  country VARCHAR(100),
+  contact_email VARCHAR(255),
+  phone VARCHAR(50),
+  status VARCHAR(20) DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Shipments (Expeditions)
+CREATE TABLE IF NOT EXISTS shipments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  reference VARCHAR(50),
+  origin VARCHAR(255),
+  destination VARCHAR(255),
+  carrier VARCHAR(100),
+  items INTEGER DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'transit',
+  eta DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Documents
+CREATE TABLE IF NOT EXISTS documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  type VARCHAR(50) DEFAULT 'facture',
+  notes TEXT,
+  file_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RLS for new tables
+ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shipments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own suppliers" ON suppliers FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own suppliers" ON suppliers FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own suppliers" ON suppliers FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own suppliers" ON suppliers FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view own shipments" ON shipments FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own shipments" ON shipments FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own shipments" ON shipments FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own shipments" ON shipments FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view own documents" ON documents FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own documents" ON documents FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own documents" ON documents FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own documents" ON documents FOR DELETE USING (auth.uid() = user_id);
