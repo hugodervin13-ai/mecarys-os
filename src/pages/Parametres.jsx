@@ -1,19 +1,37 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../lib/store'
+import { getSettings, updateSettings } from '../lib/supabase'
 
 export default function Parametres() {
   const { user } = useStore()
   const [settings, setSettings] = useState({
     currency: 'EUR',
     language: 'fr',
-    theme: 'light',
-    notifications: true,
-    emailAlerts: true,
-    stockAlertThreshold: 20
   })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
-  const handleSave = () => {
-    alert('Parametres sauvegardes !')
+  useEffect(() => {
+    if (user) loadSettings()
+  }, [user])
+
+  const loadSettings = async () => {
+    const { data } = await getSettings(user.id)
+    if (data) {
+      setSettings({
+        currency: data.currency || 'EUR',
+        language: data.language || 'fr',
+      })
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    await updateSettings(user.id, settings)
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
   }
 
   return (
@@ -64,48 +82,21 @@ export default function Parametres() {
                 </select>
               </div>
             </div>
-            <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Seuil alerte stock</label>
-              <input
-                type="number"
-                value={settings.stockAlertThreshold}
-                onChange={(e) => setSettings({...settings, stockAlertThreshold: Number(e.target.value)})}
-                className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none"
-              />
-            </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-6 border border-[#e8e8e3]">
-          <h3 className="text-[#1a1a2e] font-bold mb-4">Notifications</h3>
-          <div className="space-y-4">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[#6b7280] text-sm">Notifications push</span>
-              <div
-                onClick={() => setSettings({...settings, notifications: !settings.notifications})}
-                className={`w-11 h-6 rounded-full transition-colors cursor-pointer ${settings.notifications ? 'bg-[#6366f1]' : 'bg-[#d1d5db]'}`}
-              >
-                <div className={`w-5 h-5 bg-white rounded-full transition-transform mt-0.5 ${settings.notifications ? 'translate-x-5.5' : 'translate-x-0.5'}`}></div>
-              </div>
-            </label>
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-[#6b7280] text-sm">Alertes par email</span>
-              <div
-                onClick={() => setSettings({...settings, emailAlerts: !settings.emailAlerts})}
-                className={`w-11 h-6 rounded-full transition-colors cursor-pointer ${settings.emailAlerts ? 'bg-[#6366f1]' : 'bg-[#d1d5db]'}`}
-              >
-                <div className={`w-5 h-5 bg-white rounded-full transition-transform mt-0.5 ${settings.emailAlerts ? 'translate-x-5.5' : 'translate-x-0.5'}`}></div>
-              </div>
-            </label>
-          </div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-50 text-white px-8 py-3 rounded-lg font-semibold transition-colors"
+          >
+            {saving ? 'Sauvegarde...' : 'Sauvegarder les parametres'}
+          </button>
+          {saved && (
+            <span className="text-[#10b981] text-sm font-medium">✓ Parametres sauvegardes</span>
+          )}
         </div>
-
-        <button
-          onClick={handleSave}
-          className="bg-[#6366f1] hover:bg-[#4f46e5] text-white px-8 py-3 rounded-lg font-semibold transition-colors"
-        >
-          Sauvegarder les parametres
-        </button>
       </div>
     </div>
   )

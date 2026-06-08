@@ -22,6 +22,7 @@ export const getCurrentUser = async () => {
   return data?.session?.user
 }
 
+// --- Products ---
 export const getProducts = async (userId) => {
   const { data, error } = await supabase
     .from('products')
@@ -55,6 +56,7 @@ export const deleteProduct = async (id) => {
   return { data, error }
 }
 
+// --- Alerts ---
 export const getAlerts = async (userId) => {
   const { data, error } = await supabase
     .from('alerts')
@@ -64,6 +66,7 @@ export const getAlerts = async (userId) => {
   return { data, error }
 }
 
+// --- Orders ---
 export const getOrders = async (userId) => {
   const { data, error } = await supabase
     .from('orders')
@@ -81,6 +84,24 @@ export const addOrder = async (userId, order) => {
   return { data, error }
 }
 
+export const updateOrder = async (id, updates) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .update(updates)
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
+export const deleteOrder = async (id) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+// --- Competitors ---
 export const getCompetitors = async (productId) => {
   const { data, error } = await supabase
     .from('competitors')
@@ -99,6 +120,120 @@ export const getAllCompetitors = async (userId) => {
   return { data, error }
 }
 
+export const addCompetitor = async (competitor) => {
+  const { data, error } = await supabase
+    .from('competitors')
+    .insert([competitor])
+    .select()
+  return { data, error }
+}
+
+export const deleteCompetitor = async (id) => {
+  const { data, error } = await supabase
+    .from('competitors')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+// --- Suppliers ---
+export const getSuppliers = async (userId) => {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  return { data, error }
+}
+
+export const addSupplier = async (userId, supplier) => {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .insert([{ ...supplier, user_id: userId }])
+    .select()
+  return { data, error }
+}
+
+export const deleteSupplier = async (id) => {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+// --- Shipments ---
+export const getShipments = async (userId) => {
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  return { data, error }
+}
+
+export const addShipment = async (userId, shipment) => {
+  const { data, error } = await supabase
+    .from('shipments')
+    .insert([{ ...shipment, user_id: userId }])
+    .select()
+  return { data, error }
+}
+
+export const updateShipment = async (id, updates) => {
+  const { data, error } = await supabase
+    .from('shipments')
+    .update(updates)
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
+export const deleteShipment = async (id) => {
+  const { data, error } = await supabase
+    .from('shipments')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+// --- Documents ---
+export const getDocuments = async (userId) => {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  return { data, error }
+}
+
+export const addDocument = async (userId, doc) => {
+  const { data, error } = await supabase
+    .from('documents')
+    .insert([{ ...doc, user_id: userId }])
+    .select()
+  return { data, error }
+}
+
+export const deleteDocument = async (id) => {
+  const { data, error } = await supabase
+    .from('documents')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+export const uploadFile = async (userId, file) => {
+  const path = `${userId}/${Date.now()}_${file.name}`
+  const { data, error } = await supabase.storage
+    .from('documents')
+    .upload(path, file)
+  if (error) return { data: null, error }
+  const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path)
+  return { data: { path, url: urlData.publicUrl }, error: null }
+}
+
+// --- Settings ---
 export const getSettings = async (userId) => {
   const { data, error } = await supabase
     .from('settings')

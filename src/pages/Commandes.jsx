@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getOrders } from '../lib/supabase'
+import { getOrders, addOrder, getProducts, deleteOrder, updateOrder } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { formatCurrency, formatDate, getStatusColor } from '../lib/utils'
 import Loading from '../components/Loading'
@@ -14,20 +14,60 @@ const statusLabels = {
   cancelled: 'Annulee'
 }
 
+const emptyForm = { order_number: '', supplier: '', product_id: '', quantity: '', cost_total: '', expected_delivery: '', status: 'pending' }
+
 export default function Commandes() {
   const { user } = useStore()
   const [orders, setOrders] = useState([])
+  const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (user) loadData()
   }, [user])
 
   const loadData = async () => {
-    const { data } = await getOrders(user.id)
-    setOrders(data || [])
+    const [ordersRes, productsRes] = await Promise.all([
+      getOrders(user.id),
+      getProducts(user.id)
+    ])
+    setOrders(ordersRes.data || [])
+    setProducts(productsRes.data || [])
     setLoading(false)
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    const orderData = {
+      order_number: form.order_number || `CMD-${Date.now().toString(36).toUpperCase()}`,
+      supplier: form.supplier,
+      quantity: Number(form.quantity),
+      cost_total: Number(form.cost_total),
+      status: form.status,
+    }
+    if (form.product_id) orderData.product_id = form.product_id
+    if (form.expected_delivery) orderData.expected_delivery = form.expected_delivery
+
+    await addOrder(user.id, orderData)
+    setForm(emptyForm)
+    setShowForm(false)
+    setSaving(false)
+    loadData()
+  }
+
+  const handleStatusChange = async (id, newStatus) => {
+    await updateOrder(id, { status: newStatus })
+    loadData()
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Supprimer cette commande ?')) return
+    await deleteOrder(id)
+    loadData()
   }
 
   if (loading) return <Loading />
@@ -74,6 +114,7 @@ export default function Commandes() {
               <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Montant</th>
               <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Statut</th>
               <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Livraison prevue</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -85,12 +126,21 @@ export default function Commandes() {
                 <td className="px-6 py-4 text-[#1a1a2e] text-sm">{order.quantity}</td>
                 <td className="px-6 py-4 text-[#1a1a2e] text-sm">{formatCurrency(order.cost_total || 0)}</td>
                 <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded-full text-xs border ${getStatusColor(order.status)}`}>
-                    {statusLabels[order.status] || order.status}
-                  </span>
+                  <select
+                    value={order.status}
+                    onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                    className={`px-2 py-1 rounded-full text-xs border cursor-pointer ${getStatusColor(order.status)}`}
+                  >
+                    {Object.entries(statusLabels).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-6 py-4 text-[#6b7280] text-sm">
                   {order.expected_delivery ? formatDate(order.expected_delivery) : '-'}
+                </td>
+                <td className="px-6 py-4">
+                  <button onClick={() => handleDelete(order.id)} className="text-[#ef4444] hover:text-red-300 text-sm">Supprimer</button>
                 </td>
               </tr>
             ))}
@@ -104,29 +154,42 @@ export default function Commandes() {
       </div>
 
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle commande">
-        <form className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[#6b7280] text-sm mb-1">N° commande</label>
-              <input type="text" className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
+              <input type="text" placeholder="Auto-genere si vide" value={form.order_number} onChange={(e) => setForm({...form, order_number: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
             </div>
             <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Fournisseur</label>
-              <input type="text" className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
+              <label className="block text-[#6b7280] text-sm mb-1">Fournisseur *</label>
+              <input type="text" value={form.supplier} onChange={(e) => setForm({...form, supplier: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
             </div>
           </div>
+          {products.length > 0 && (
+            <div>
+              <label className="block text-[#6b7280] text-sm mb-1">Produit</label>
+              <select value={form.product_id} onChange={(e) => setForm({...form, product_id: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm">
+                <option value="">-- Selectionner --</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.asin})</option>)}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Quantite</label>
-              <input type="number" className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
+              <label className="block text-[#6b7280] text-sm mb-1">Quantite *</label>
+              <input type="number" value={form.quantity} onChange={(e) => setForm({...form, quantity: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
             </div>
             <div>
-              <label className="block text-[#6b7280] text-sm mb-1">Montant total</label>
-              <input type="number" step="0.01" className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
+              <label className="block text-[#6b7280] text-sm mb-1">Montant total (€) *</label>
+              <input type="number" step="0.01" value={form.cost_total} onChange={(e) => setForm({...form, cost_total: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" required />
             </div>
           </div>
-          <button type="submit" className="w-full bg-[#6366f1] hover:bg-[#4f46e5] text-white py-3 rounded-lg font-semibold transition-colors">
-            Creer la commande
+          <div>
+            <label className="block text-[#6b7280] text-sm mb-1">Livraison prevue</label>
+            <input type="date" value={form.expected_delivery} onChange={(e) => setForm({...form, expected_delivery: e.target.value})} className="w-full px-3 py-2 bg-[#fafaf8] border border-[#e8e8e3] rounded-lg text-[#1a1a2e] text-sm focus:border-[#6366f1] focus:outline-none" />
+          </div>
+          <button type="submit" disabled={saving} className="w-full bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition-colors">
+            {saving ? 'Creation...' : 'Creer la commande'}
           </button>
         </form>
       </Modal>
