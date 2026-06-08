@@ -6,7 +6,7 @@ export default function Parametres() {
   const [settings, setSettings] = useState({
     currency: 'EUR',
     language: 'fr',
-    theme: 'dark',
+    theme: 'light',
     notifications: true,
     emailAlerts: true,
     stockAlertThreshold: 20
