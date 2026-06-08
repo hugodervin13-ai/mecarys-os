@@ -62,11 +62,7 @@ export default function Sidebar() {
       {/* Header */}
       <div style={{ padding: sidebarOpen ? '20px 16px 16px' : '20px 0 16px', display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
-          </div>
+          <img src="/logo.svg" alt="MECARYS" style={{ width: 36, height: 36, flexShrink: 0 }} />
           {sidebarOpen && <span style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>MECARYS OS</span>}
         </div>
         <button
@@ -127,7 +123,7 @@ export default function Sidebar() {
 
       {/* Account */}
       <div style={{ padding: sidebarOpen ? '12px 14px' : '12px 0', borderTop: '1px solid #f0f0eb', display: 'flex', alignItems: 'center', gap: 10, justifyContent: sidebarOpen ? 'flex-start' : 'center' }}>
-        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>M</div>
+        <img src="/logo.svg" alt="M" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0 }} />
         {sidebarOpen && (
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>MECARYS</div>
