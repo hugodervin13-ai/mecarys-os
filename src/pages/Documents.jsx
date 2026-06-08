@@ -25,8 +25,8 @@ export default function Documents() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-white">Documents</h1>
-        <button className="bg-[#5a2d82] hover:bg-[#6b3d92] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+        <h1 className="text-3xl font-bold text-[#1a1a2e]">Documents</h1>
+        <button className="bg-[#6366f1] hover:bg-[#4f46e5] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">
           + Importer un document
         </button>
       </div>
@@ -36,42 +36,42 @@ export default function Documents() {
           <button
             key={type}
             onClick={() => setFilter(type)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === type ? 'bg-[#5a2d82] text-white' : 'bg-[#1a1f2e] text-[#a0aec0] hover:text-white border border-[#2d3748]'}`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === type ? 'bg-[#6366f1] text-white' : 'bg-white text-[#6b7280] hover:text-[#1a1a2e] border border-[#e8e8e3]'}`}
           >
             {type === 'all' ? 'Tous' : type.charAt(0).toUpperCase() + type.slice(1) + 's'}
           </button>
         ))}
       </div>
 
-      <div className="bg-[#1a1f2e] rounded-xl border border-[#2d3748] overflow-hidden">
+      <div className="bg-white rounded-xl border border-[#e8e8e3] overflow-hidden">
         <table className="w-full">
-          <thead className="bg-[#0f1419]">
+          <thead className="bg-[#fafaf8]">
             <tr>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Document</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Type</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Date</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Taille</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Actions</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Document</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Type</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Date</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Taille</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((doc) => (
-              <tr key={doc.id} className="border-t border-[#2d3748] hover:bg-[#2d3748]/30">
+              <tr key={doc.id} className="border-t border-[#e8e8e3] hover:bg-[#f5f5f0]">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="text-lg">{typeIcons[doc.type] || '📄'}</span>
-                    <span className="text-white text-sm">{doc.name}</span>
+                    <span className="text-[#1a1a2e] text-sm">{doc.name}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="bg-[#5a2d82]/20 text-[#5a2d82] px-2 py-1 rounded-full text-xs capitalize">
+                  <span className="bg-[#6366f1]/20 text-[#6366f1] px-2 py-1 rounded-full text-xs capitalize">
                     {doc.type}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-[#a0aec0] text-sm">{doc.date}</td>
-                <td className="px-6 py-4 text-[#a0aec0] text-sm">{doc.size}</td>
+                <td className="px-6 py-4 text-[#6b7280] text-sm">{doc.date}</td>
+                <td className="px-6 py-4 text-[#6b7280] text-sm">{doc.size}</td>
                 <td className="px-6 py-4">
-                  <button className="text-[#00d4ff] hover:text-[#00b4d8] text-sm mr-4">Voir</button>
+                  <button className="text-[#3b82f6] hover:text-[#2563eb] text-sm mr-4">Voir</button>
                   <button className="text-[#ef4444] hover:text-red-300 text-sm">Supprimer</button>
                 </td>
               </tr>

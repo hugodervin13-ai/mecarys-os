@@ -26,50 +26,50 @@ export default function Comptabilite() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-white mb-6">Comptabilite</h1>
+      <h1 className="text-3xl font-bold text-[#1a1a2e] mb-6">Comptabilite</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-[#1a1f2e] rounded-xl p-5 border border-[#2d3748]">
-          <p className="text-[#a0aec0] text-sm">Revenus totaux (YTD)</p>
-          <p className="text-2xl font-bold text-white mt-1">{formatCurrency(totalRevenus)}</p>
+        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
+          <p className="text-[#6b7280] text-sm">Revenus totaux (YTD)</p>
+          <p className="text-2xl font-bold text-[#1a1a2e] mt-1">{formatCurrency(totalRevenus)}</p>
         </div>
-        <div className="bg-[#1a1f2e] rounded-xl p-5 border border-[#2d3748]">
-          <p className="text-[#a0aec0] text-sm">Depenses totales (YTD)</p>
+        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
+          <p className="text-[#6b7280] text-sm">Depenses totales (YTD)</p>
           <p className="text-2xl font-bold text-[#ef4444] mt-1">{formatCurrency(totalDepenses)}</p>
         </div>
-        <div className="bg-[#1a1f2e] rounded-xl p-5 border border-[#2d3748]">
-          <p className="text-[#a0aec0] text-sm">Profit net (YTD)</p>
+        <div className="bg-white rounded-xl p-5 border border-[#e8e8e3]">
+          <p className="text-[#6b7280] text-sm">Profit net (YTD)</p>
           <p className="text-2xl font-bold text-[#10b981] mt-1">{formatCurrency(totalProfit)}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-[#1a1f2e] rounded-xl p-6 border border-[#2d3748]">
-          <h3 className="text-white font-bold mb-4">Revenus vs Depenses</h3>
+        <div className="bg-white rounded-xl p-6 border border-[#e8e8e3]">
+          <h3 className="text-[#1a1a2e] font-bold mb-4">Revenus vs Depenses</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={mockData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="month" stroke="#a0aec0" fontSize={12} />
-              <YAxis stroke="#a0aec0" fontSize={12} />
-              <Tooltip contentStyle={{ backgroundColor: '#1a1f2e', border: '1px solid #2d3748', borderRadius: '8px', color: '#fff' }} />
-              <Bar dataKey="revenus" fill="#5a2d82" radius={[4, 4, 0, 0]} name="Revenus" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e3" />
+              <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} />
+              <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e8e8e3', borderRadius: '8px', color: '#1a1a2e' }} />
+              <Bar dataKey="revenus" fill="#6366f1" radius={[4, 4, 0, 0]} name="Revenus" />
               <Bar dataKey="depenses" fill="#ef4444" radius={[4, 4, 0, 0]} name="Depenses" />
               <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} name="Profit" />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-[#1a1f2e] rounded-xl p-6 border border-[#2d3748]">
-          <h3 className="text-white font-bold mb-4">Repartition des depenses</h3>
+        <div className="bg-white rounded-xl p-6 border border-[#e8e8e3]">
+          <h3 className="text-[#1a1a2e] font-bold mb-4">Repartition des depenses</h3>
           <div className="space-y-4">
             {mockExpenses.map((exp) => (
               <div key={exp.category}>
                 <div className="flex justify-between mb-1">
-                  <span className="text-[#a0aec0] text-sm">{exp.category}</span>
-                  <span className="text-white text-sm font-medium">{formatCurrency(exp.amount)} ({exp.percent}%)</span>
+                  <span className="text-[#6b7280] text-sm">{exp.category}</span>
+                  <span className="text-[#1a1a2e] text-sm font-medium">{formatCurrency(exp.amount)} ({exp.percent}%)</span>
                 </div>
-                <div className="w-full bg-[#0f1419] rounded-full h-2">
-                  <div className="bg-[#5a2d82] h-2 rounded-full" style={{ width: `${exp.percent}%` }}></div>
+                <div className="w-full bg-[#fafaf8] rounded-full h-2">
+                  <div className="bg-[#6366f1] h-2 rounded-full" style={{ width: `${exp.percent}%` }}></div>
                 </div>
               </div>
             ))}

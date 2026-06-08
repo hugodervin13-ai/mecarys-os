@@ -6,12 +6,12 @@ export const useStore = create((set) => ({
   alerts: [],
   orders: [],
   settings: null,
-  sidebarCollapsed: false,
+  sidebarOpen: true,
   setUser: (user) => set({ user }),
   setProducts: (products) => set({ products }),
   setAlerts: (alerts) => set({ alerts }),
   setOrders: (orders) => set({ orders }),
   setSettings: (settings) => set({ settings }),
-  toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   logout: () => set({ user: null, products: [], alerts: [], orders: [], settings: null })
 }))

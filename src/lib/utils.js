@@ -28,17 +28,17 @@ export const formatDateShort = (date) => {
 
 export const getStatusColor = (status) => {
   const colors = {
-    active: 'bg-green-900/30 text-green-400 border-green-700',
-    inactive: 'bg-gray-900/30 text-gray-400 border-gray-700',
-    pending: 'bg-yellow-900/30 text-yellow-400 border-yellow-700',
-    shipped: 'bg-blue-900/30 text-blue-400 border-blue-700',
-    delivered: 'bg-green-900/30 text-green-400 border-green-700',
-    cancelled: 'bg-red-900/30 text-red-400 border-red-700',
-    production: 'bg-purple-900/30 text-purple-400 border-purple-700',
-    transit: 'bg-blue-900/30 text-blue-400 border-blue-700',
-    customs: 'bg-orange-900/30 text-orange-400 border-orange-700',
-    warehouse: 'bg-cyan-900/30 text-cyan-400 border-cyan-700',
-    fba: 'bg-green-900/30 text-green-400 border-green-700'
+    active: 'bg-green-50 text-green-600 border-green-200',
+    inactive: 'bg-gray-50 text-gray-600 border-gray-200',
+    pending: 'bg-yellow-50 text-yellow-600 border-yellow-200',
+    shipped: 'bg-blue-50 text-blue-600 border-blue-200',
+    delivered: 'bg-green-50 text-green-600 border-green-200',
+    cancelled: 'bg-red-50 text-red-600 border-red-200',
+    production: 'bg-purple-50 text-purple-600 border-purple-200',
+    transit: 'bg-blue-50 text-blue-600 border-blue-200',
+    customs: 'bg-orange-50 text-orange-600 border-orange-200',
+    warehouse: 'bg-cyan-50 text-cyan-600 border-cyan-200',
+    fba: 'bg-green-50 text-green-600 border-green-200'
   }
   return colors[status] || colors.pending
 }

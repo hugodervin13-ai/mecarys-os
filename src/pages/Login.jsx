@@ -14,7 +14,6 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
     setError('')
-
     try {
       const fn = isSignUp ? signUp : signIn
       const { data, error: authError } = await fn(email, password)
@@ -28,68 +27,65 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center px-4">
-      <div className="w-full max-w-[380px]">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-3">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    <div style={{ minHeight: '100vh', background: '#f5f5f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div style={{ width: '100%', maxWidth: 400 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
               </svg>
             </div>
-            <h1 className="text-[22px] font-bold text-white tracking-tight">MECARYS OS</h1>
+            <span style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.5px' }}>MECARYS OS</span>
           </div>
-          <p className="text-text-secondary text-[13px]">
+          <p style={{ fontSize: 13, color: '#9ca3af' }}>
             {isSignUp ? 'Creez votre compte pour commencer' : 'Connectez-vous a votre espace'}
           </p>
         </div>
 
-        {/* Card */}
-        <div className="bg-surface rounded-2xl p-7 border border-border">
+        <div style={{ background: '#ffffff', borderRadius: 16, padding: 32, border: '1px solid #e8e8e3', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
           {error && (
-            <div className="mb-5 p-3 bg-danger/10 border border-danger/30 rounded-lg text-danger text-[12px]">
+            <div style={{ marginBottom: 20, padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 12 }}>
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-text-secondary text-[12px] font-medium mb-1.5">Email</label>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', color: '#6b7280', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Email</label>
               <input
                 type="email"
                 placeholder="votre@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-bg text-white rounded-lg border border-border focus:border-primary text-[13px] transition-colors placeholder:text-text-muted"
                 required
+                style={{ width: '100%', padding: '10px 14px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 10, color: '#1a1a2e', fontSize: 13 }}
               />
             </div>
-            <div>
-              <label className="block text-text-secondary text-[12px] font-medium mb-1.5">Mot de passe</label>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', color: '#6b7280', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Mot de passe</label>
               <input
                 type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-bg text-white rounded-lg border border-border focus:border-primary text-[13px] transition-colors placeholder:text-text-muted"
                 required
+                style={{ width: '100%', padding: '10px 14px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 10, color: '#1a1a2e', fontSize: 13 }}
               />
             </div>
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors mt-2"
+              style={{ width: '100%', padding: '11px 0', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
             >
               {loading ? 'Chargement...' : isSignUp ? "S'inscrire" : 'Se connecter'}
             </button>
           </form>
 
-          <div className="mt-5 text-center">
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
             <button
               onClick={() => { setIsSignUp(!isSignUp); setError('') }}
-              className="text-text-secondary hover:text-white text-[12px] transition-colors"
+              style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               {isSignUp ? "J'ai deja un compte" : "Creer un compte"}
             </button>

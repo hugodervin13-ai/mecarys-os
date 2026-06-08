@@ -50,7 +50,7 @@ export default function VentesProfit() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-white mb-6">Ventes & Profit</h1>
+      <h1 className="text-3xl font-bold text-[#1a1a2e] mb-6">Ventes & Profit</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <KPICard title="CA total (30j)" value={formatCurrency(totalRevenue)} change={22.8} icon="💰" />
@@ -60,78 +60,78 @@ export default function VentesProfit() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-[#1a1f2e] rounded-xl p-6 border border-[#2d3748]">
-          <h3 className="text-white font-bold mb-4">Evolution mensuelle</h3>
+        <div className="bg-white rounded-xl p-6 border border-[#e8e8e3]">
+          <h3 className="text-[#1a1a2e] font-bold mb-4">Evolution mensuelle</h3>
           <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={mockMonthlyData}>
               <defs>
                 <linearGradient id="ventesG" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#5a2d82" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#5a2d82" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="profitG" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="month" stroke="#a0aec0" fontSize={12} />
-              <YAxis stroke="#a0aec0" fontSize={12} />
-              <Tooltip contentStyle={{ backgroundColor: '#1a1f2e', border: '1px solid #2d3748', borderRadius: '8px', color: '#fff' }} />
-              <Area type="monotone" dataKey="ventes" stroke="#5a2d82" fill="url(#ventesG)" strokeWidth={2} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e3" />
+              <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} />
+              <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e8e8e3', borderRadius: '8px', color: '#1a1a2e' }} />
+              <Area type="monotone" dataKey="ventes" stroke="#6366f1" fill="url(#ventesG)" strokeWidth={2} />
               <Area type="monotone" dataKey="profit" stroke="#10b981" fill="url(#profitG)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-[#1a1f2e] rounded-xl p-6 border border-[#2d3748]">
-          <h3 className="text-white font-bold mb-4">Ventes par jour (cette semaine)</h3>
+        <div className="bg-white rounded-xl p-6 border border-[#e8e8e3]">
+          <h3 className="text-[#1a1a2e] font-bold mb-4">Ventes par jour (cette semaine)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={mockDailyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="jour" stroke="#a0aec0" fontSize={12} />
-              <YAxis stroke="#a0aec0" fontSize={12} />
-              <Tooltip contentStyle={{ backgroundColor: '#1a1f2e', border: '1px solid #2d3748', borderRadius: '8px', color: '#fff' }} />
-              <Bar dataKey="ventes" fill="#5a2d82" radius={[4, 4, 0, 0]} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e3" />
+              <XAxis dataKey="jour" stroke="#6b7280" fontSize={12} />
+              <YAxis stroke="#6b7280" fontSize={12} />
+              <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e8e8e3', borderRadius: '8px', color: '#1a1a2e' }} />
+              <Bar dataKey="ventes" fill="#6366f1" radius={[4, 4, 0, 0]} />
               <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="bg-[#1a1f2e] rounded-xl border border-[#2d3748] overflow-hidden">
-        <div className="p-6 border-b border-[#2d3748]">
-          <h3 className="text-white font-bold">Detail par produit</h3>
+      <div className="bg-white rounded-xl border border-[#e8e8e3] overflow-hidden">
+        <div className="p-6 border-b border-[#e8e8e3]">
+          <h3 className="text-[#1a1a2e] font-bold">Detail par produit</h3>
         </div>
         <table className="w-full">
-          <thead className="bg-[#0f1419]">
+          <thead className="bg-[#fafaf8]">
             <tr>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Produit</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">CA (30j)</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Profit (30j)</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Marge</th>
-              <th className="px-6 py-3 text-left text-[#a0aec0] text-sm font-medium">Unites</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Produit</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">CA (30j)</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Profit (30j)</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Marge</th>
+              <th className="px-6 py-3 text-left text-[#6b7280] text-sm font-medium">Unites</th>
             </tr>
           </thead>
           <tbody>
             {products.map((p) => (
-              <tr key={p.id} className="border-t border-[#2d3748] hover:bg-[#2d3748]/30">
+              <tr key={p.id} className="border-t border-[#e8e8e3] hover:bg-[#f5f5f0]">
                 <td className="px-6 py-4">
-                  <p className="text-white text-sm font-medium">{p.name}</p>
-                  <p className="text-[#a0aec0] text-xs">{p.asin}</p>
+                  <p className="text-[#1a1a2e] text-sm font-medium">{p.name}</p>
+                  <p className="text-[#6b7280] text-xs">{p.asin}</p>
                 </td>
-                <td className="px-6 py-4 text-white text-sm">{formatCurrency(p.revenue_30d || 0)}</td>
+                <td className="px-6 py-4 text-[#1a1a2e] text-sm">{formatCurrency(p.revenue_30d || 0)}</td>
                 <td className="px-6 py-4 text-[#10b981] text-sm">{formatCurrency(p.profit_30d || 0)}</td>
-                <td className="px-6 py-4 text-white text-sm">
+                <td className="px-6 py-4 text-[#1a1a2e] text-sm">
                   {p.revenue_30d > 0 ? ((p.profit_30d / p.revenue_30d) * 100).toFixed(1) : 0}%
                 </td>
-                <td className="px-6 py-4 text-white text-sm">{formatNumber(p.units_sold_30d || 0)}</td>
+                <td className="px-6 py-4 text-[#1a1a2e] text-sm">{formatNumber(p.units_sold_30d || 0)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {products.length === 0 && (
-          <div className="p-12 text-center text-[#a0aec0]">Ajoutez des produits pour voir les donnees de ventes.</div>
+          <div className="p-12 text-center text-[#6b7280]">Ajoutez des produits pour voir les donnees de ventes.</div>
         )}
       </div>
     </div>
