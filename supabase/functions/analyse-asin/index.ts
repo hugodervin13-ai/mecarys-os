@@ -132,9 +132,9 @@ serve(async (req) => {
       })
     }
 
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!anthropicKey) {
-      return new Response(JSON.stringify({ error: 'Clé ANTHROPIC_API_KEY non configurée dans les secrets Supabase' }), {
+    const geminiKey = Deno.env.get('GEMINI_API_KEY')
+    if (!geminiKey) {
+      return new Response(JSON.stringify({ error: 'Clé GEMINI_API_KEY non configurée dans les secrets Supabase' }), {
         status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
       })
     }
@@ -364,28 +364,31 @@ Réponds avec ce JSON exact :
   }
 }`
 
-    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-opus-4-6',
-        max_tokens: 6000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
+    const geminiResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 6000,
+            responseMimeType: 'application/json',
+          },
+        }),
+      }
+    )
 
-    if (!claudeResp.ok) {
-      const errText = await claudeResp.text()
-      throw new Error(`Erreur API Claude: ${errText}`)
+    if (!geminiResp.ok) {
+      const errText = await geminiResp.text()
+      throw new Error(`Erreur API Gemini: ${errText}`)
     }
 
-    const claudeData = await claudeResp.json()
-    const rawText = claudeData.content[0].text.trim()
+    const geminiData = await geminiResp.json()
+    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+    if (!rawText) throw new Error('Réponse vide de Gemini')
 
     let analysis
     try {
