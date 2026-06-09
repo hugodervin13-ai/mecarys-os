@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getDocuments, addDocument, deleteDocument, getProducts } from '../lib/supabase'
+import { getDocuments, addDocument, deleteDocument, getProducts, uploadFile } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { formatDate } from '../lib/utils'
 import Loading from '../components/Loading'
@@ -48,7 +48,7 @@ export default function Documents() {
   const [showForm, setShowForm] = useState(false)
   const [showFolderForm, setShowFolderForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', type: 'photo', notes: '', product_id: '' })
+  const [form, setForm] = useState({ name: '', type: 'photo', notes: '', product_id: '', file: null })
   const [folderForm, setFolderForm] = useState({ name: '', asin: '' })
   const [editingFolder, setEditingFolder] = useState(null)
   const [showEditFolder, setShowEditFolder] = useState(false)
@@ -108,14 +108,23 @@ export default function Documents() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
-    const docData = { ...form, product_id: selectedProduct || form.product_id }
+    let fileUrl = ''
+    let fileName = form.name
+
+    if (form.file) {
+      if (!fileName) fileName = form.file.name
+      const uploadRes = await uploadFile(user.id, form.file)
+      if (uploadRes.data?.url) fileUrl = uploadRes.data.url
+    }
+
+    const docData = { name: fileName, type: form.type, notes: form.notes, product_id: selectedProduct || form.product_id, file_url: fileUrl }
     if (useMock || !selectedProduct || String(selectedProduct).startsWith('p')) {
       setDocuments(prev => [{ ...docData, id: `m${Date.now()}`, created_at: new Date().toISOString() }, ...prev])
     } else {
       await addDocument(user.id, docData)
       await loadData()
     }
-    setForm({ name: '', type: 'photo', notes: '', product_id: '' })
+    setForm({ name: '', type: 'photo', notes: '', product_id: '', file: null })
     setShowForm(false)
     setSaving(false)
   }
@@ -258,16 +267,24 @@ export default function Documents() {
                   <tbody>
                     {filteredDocs.map(doc => {
                       const cfg = CATEGORIES[doc.type] || CATEGORIES.autre
+                      const hasFile = !!doc.file_url
                       return (
-                        <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb' }}
+                        <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb', cursor: hasFile ? 'pointer' : 'default' }}
                           onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}>
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                          onClick={() => { if (hasFile) window.open(doc.file_url, '_blank') }}>
                           <td style={{ padding: '12px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <div style={{ width: 36, height: 36, borderRadius: 8, background: `${cfg.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
                                 {cfg.icon}
                               </div>
-                              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{doc.name}</span>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: hasFile ? '#6366f1' : '#1a1a2e', textDecoration: hasFile ? 'underline' : 'none' }}>{doc.name}</span>
+                                  {hasFile && <span style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>📎</span>}
+                                </div>
+                                {!hasFile && <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>Pas de fichier joint</div>}
+                              </div>
                             </div>
                           </td>
                           <td style={{ padding: '12px 16px' }}>
@@ -282,10 +299,18 @@ export default function Documents() {
                             {doc.created_at ? formatDate(doc.created_at) : '-'}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <button onClick={() => handleDelete(doc.id)}
-                              style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-                              Supprimer
-                            </button>
+                            <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                              {hasFile && (
+                                <a href={doc.file_url} download target="_blank" rel="noreferrer"
+                                  style={{ fontSize: 12, color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, textDecoration: 'none' }}>
+                                  Ouvrir
+                                </a>
+                              )}
+                              <button onClick={() => handleDelete(doc.id)}
+                                style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                                Supprimer
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -350,6 +375,34 @@ export default function Documents() {
       {/* Modal — add file */}
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Ajouter un fichier">
         <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Fichier</label>
+            <div
+              onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.background = '#6366f108' }}
+              onDragLeave={e => { e.currentTarget.style.borderColor = '#e8e8e3'; e.currentTarget.style.background = '#fafaf8' }}
+              onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#e8e8e3'; e.currentTarget.style.background = '#fafaf8'; const f = e.dataTransfer.files[0]; if (f) setForm({ ...form, file: f, name: form.name || f.name.replace(/\.[^.]+$/, '') }) }}
+              style={{ border: '2px dashed #e8e8e3', borderRadius: 10, padding: '18px 14px', textAlign: 'center', background: '#fafaf8', cursor: 'pointer', transition: 'all 0.15s' }}
+              onClick={() => document.getElementById('file-input').click()}
+            >
+              {form.file ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>📎</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{form.file.name}</span>
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>({(form.file.size / 1024 / 1024).toFixed(1)} Mo)</span>
+                  <button type="button" onClick={e => { e.stopPropagation(); setForm({ ...form, file: null }) }}
+                    style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, marginLeft: 4 }}>✕</button>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 24, marginBottom: 4 }}>📤</div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>Glissez un fichier ici ou <span style={{ color: '#6366f1', fontWeight: 600 }}>parcourir</span></div>
+                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>PDF, images, videos, documents — max 50 Mo</div>
+                </div>
+              )}
+              <input id="file-input" type="file" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files[0]; if (f) setForm({ ...form, file: f, name: form.name || f.name.replace(/\.[^.]+$/, '') }) }} />
+            </div>
+          </div>
           <div style={{ marginBottom: 12 }}>
             <label style={lbl}>Nom du fichier *</label>
             <input style={inp} type="text" placeholder="Ex: Photo principale HD" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
