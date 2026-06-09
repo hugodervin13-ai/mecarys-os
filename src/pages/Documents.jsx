@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { getDocuments, addDocument, deleteDocument, getProducts, uploadFile } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { formatDate } from '../lib/utils'
@@ -21,88 +21,83 @@ const CATEGORIES = {
   autre:       { label: 'Autres',            icon: '📁', color: '#6b7280' },
 }
 
-const mockProducts = [
-  { id: 'p1', name: 'Kit Phare LED H7', asin: 'B08N5WRWNW' },
-  { id: 'p2', name: 'Ampoule LED H4', asin: 'B09X1ZZKZL' },
-]
-
-const mockDocuments = [
-  { id: 'm1', name: 'Photo principale HD', type: 'photo', product_id: 'p1', created_at: '2024-05-10', notes: 'Photo packshot fond blanc' },
-  { id: 'm2', name: 'Video demo installation', type: 'video', product_id: 'p1', created_at: '2024-05-08', notes: 'Video 30s pour listing' },
-  { id: 'm3', name: 'Facture Shenzhen #042', type: 'facture', product_id: 'p1', created_at: '2024-04-28', notes: '500 unites' },
-  { id: 'm4', name: 'Certificat CE', type: 'certificat', product_id: 'p1', created_at: '2024-04-15', notes: 'Valable 2026' },
-  { id: 'm5', name: 'BAT packaging V3', type: 'packaging', product_id: 'p1', created_at: '2024-04-10', notes: 'Version finale approuvee' },
-  { id: 'm6', name: 'Fiche technique H7', type: 'technique', product_id: 'p1', created_at: '2024-04-05', notes: 'Specs completes' },
-  { id: 'm7', name: 'Photo lifestyle', type: 'photo', product_id: 'p2', created_at: '2024-05-02', notes: 'Sur vehicule' },
-  { id: 'm8', name: 'Facture Guangzhou #018', type: 'facture', product_id: 'p2', created_at: '2024-04-20', notes: '300 unites' },
-  { id: 'm9', name: 'Certificat FCC', type: 'certificat', product_id: 'p2', created_at: '2024-03-15', notes: '' },
-]
-
 export default function Documents() {
   const { user } = useStore()
   const [documents, setDocuments] = useState([])
-  const [products, setProducts] = useState([])
+  const [folders, setFolders] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [selectedFolder, setSelectedFolder] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [showForm, setShowForm] = useState(false)
   const [showFolderForm, setShowFolderForm] = useState(false)
+  const [showEditFolder, setShowEditFolder] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', type: 'photo', notes: '', product_id: '', file: null })
+  const [form, setForm] = useState({ name: '', type: 'photo', notes: '', file: null })
   const [folderForm, setFolderForm] = useState({ name: '', asin: '' })
   const [editingFolder, setEditingFolder] = useState(null)
-  const [showEditFolder, setShowEditFolder] = useState(false)
-  const [useMock, setUseMock] = useState(false)
-  const [localProducts, setLocalProducts] = useState([])
+  const fileInputRef = useRef(null)
 
   useEffect(() => { if (user) loadData() }, [user])
 
   const loadData = async () => {
     const [docRes, prodRes] = await Promise.all([getDocuments(user.id), getProducts(user.id)])
-    const hasProducts = prodRes.data && prodRes.data.length > 0
-    if (!hasProducts) {
-      setProducts(mockProducts)
-      setLocalProducts(mockProducts)
-      setDocuments(mockDocuments)
-      setUseMock(true)
-    } else {
-      setProducts(prodRes.data)
-      setLocalProducts(prodRes.data)
-      setDocuments(docRes.data || [])
-      setUseMock(false)
-    }
+    const savedFolders = JSON.parse(localStorage.getItem(`mecarys_folders_${user.id}`) || '[]')
+    const savedDocs = JSON.parse(localStorage.getItem(`mecarys_docs_${user.id}`) || '[]')
+
+    const supaFolders = (prodRes.data || []).map(p => ({ ...p, source: 'supabase' }))
+    const localFolders = savedFolders.map(f => ({ ...f, source: 'local' }))
+    setFolders([...supaFolders, ...localFolders])
+
+    const supaDocs = (docRes.data || []).map(d => ({ ...d, source: 'supabase' }))
+    const localDocs = savedDocs.map(d => ({ ...d, source: 'local' }))
+    setDocuments([...supaDocs, ...localDocs])
     setLoading(false)
+  }
+
+  const saveFoldersLocal = (newFolders) => {
+    const localOnly = newFolders.filter(f => f.source === 'local')
+    localStorage.setItem(`mecarys_folders_${user.id}`, JSON.stringify(localOnly))
+  }
+
+  const saveDocsLocal = (newDocs) => {
+    const localOnly = newDocs.filter(d => d.source === 'local')
+    localStorage.setItem(`mecarys_docs_${user.id}`, JSON.stringify(localOnly))
   }
 
   const createFolder = (e) => {
     e.preventDefault()
-    const newP = { id: `p${Date.now()}`, name: folderForm.name, asin: folderForm.asin || 'N/A' }
-    setLocalProducts(prev => [...prev, newP])
-    setProducts(prev => [...prev, newP])
+    const newFolder = { id: `folder_${Date.now()}`, name: folderForm.name, asin: folderForm.asin || '', source: 'local' }
+    const updated = [...folders, newFolder]
+    setFolders(updated)
+    saveFoldersLocal(updated)
     setFolderForm({ name: '', asin: '' })
     setShowFolderForm(false)
-    setSelectedProduct(newP.id)
+    setSelectedFolder(newFolder.id)
   }
 
-  const openEditFolder = (p) => {
-    setEditingFolder({ ...p })
+  const openEditFolder = (f) => {
+    setEditingFolder({ ...f })
     setShowEditFolder(true)
   }
 
   const saveEditFolder = (e) => {
     e.preventDefault()
-    setLocalProducts(prev => prev.map(p => p.id === editingFolder.id ? editingFolder : p))
-    setProducts(prev => prev.map(p => p.id === editingFolder.id ? editingFolder : p))
+    const updated = folders.map(f => f.id === editingFolder.id ? { ...f, name: editingFolder.name, asin: editingFolder.asin } : f)
+    setFolders(updated)
+    saveFoldersLocal(updated)
     setShowEditFolder(false)
     setEditingFolder(null)
   }
 
-  const deleteFolder = (id) => {
+  const handleDeleteFolder = (id) => {
     if (!confirm('Supprimer ce dossier et tous ses documents ?')) return
-    setLocalProducts(prev => prev.filter(p => p.id !== id))
-    setProducts(prev => prev.filter(p => p.id !== id))
-    setDocuments(prev => prev.filter(d => d.product_id !== id))
-    if (selectedProduct === id) setSelectedProduct(null)
+    const updatedFolders = folders.filter(f => f.id !== id)
+    const updatedDocs = documents.filter(d => d.product_id !== id)
+    setFolders(updatedFolders)
+    setDocuments(updatedDocs)
+    saveFoldersLocal(updatedFolders)
+    saveDocsLocal(updatedDocs)
+    if (selectedFolder === id) setSelectedFolder(null)
   }
 
   const handleSubmit = async (e) => {
@@ -112,35 +107,54 @@ export default function Documents() {
     let fileName = form.name
 
     if (form.file) {
-      if (!fileName) fileName = form.file.name
+      if (!fileName) fileName = form.file.name.replace(/\.[^.]+$/, '')
       const uploadRes = await uploadFile(user.id, form.file)
-      if (uploadRes.data?.url) fileUrl = uploadRes.data.url
+      if (uploadRes.data?.url) {
+        fileUrl = uploadRes.data.url
+      } else if (uploadRes.error) {
+        // Fallback: create object URL for local preview
+        fileUrl = URL.createObjectURL(form.file)
+      }
     }
 
-    const docData = { name: fileName, type: form.type, notes: form.notes, product_id: selectedProduct || form.product_id, file_url: fileUrl }
-    if (useMock || !selectedProduct || String(selectedProduct).startsWith('p')) {
-      setDocuments(prev => [{ ...docData, id: `m${Date.now()}`, created_at: new Date().toISOString() }, ...prev])
-    } else {
+    const docData = {
+      name: fileName,
+      type: form.type,
+      notes: form.notes,
+      product_id: selectedFolder,
+      file_url: fileUrl,
+    }
+
+    const folder = folders.find(f => f.id === selectedFolder)
+    if (folder?.source === 'supabase' && fileUrl && !fileUrl.startsWith('blob:')) {
       await addDocument(user.id, docData)
       await loadData()
+    } else {
+      const newDoc = { ...docData, id: `doc_${Date.now()}`, created_at: new Date().toISOString(), source: 'local' }
+      const updated = [newDoc, ...documents]
+      setDocuments(updated)
+      saveDocsLocal(updated)
     }
-    setForm({ name: '', type: 'photo', notes: '', product_id: '', file: null })
+
+    setForm({ name: '', type: 'photo', notes: '', file: null })
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setShowForm(false)
     setSaving(false)
   }
 
-  const handleDelete = async (id) => {
+  const handleDeleteDoc = async (doc) => {
     if (!confirm('Supprimer ce document ?')) return
-    if (useMock || String(id).startsWith('m')) {
-      setDocuments(prev => prev.filter(d => d.id !== id))
+    if (doc.source === 'supabase') {
+      await deleteDocument(doc.id)
+      await loadData()
     } else {
-      await deleteDocument(id)
-      loadData()
+      const updated = documents.filter(d => d.id !== doc.id)
+      setDocuments(updated)
+      saveDocsLocal(updated)
     }
   }
 
-  const allProducts = localProducts
-  const productDocs = selectedProduct ? documents.filter(d => d.product_id === selectedProduct) : []
+  const productDocs = selectedFolder ? documents.filter(d => d.product_id === selectedFolder) : []
   const filteredDocs = categoryFilter === 'all' ? productDocs : productDocs.filter(d => d.type === categoryFilter)
 
   if (loading) return <Loading />
@@ -157,8 +171,8 @@ export default function Documents() {
             style={{ padding: '10px 18px', background: '#fff', color: '#6366f1', border: '1px solid #6366f1', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             + Creer un dossier
           </button>
-          {selectedProduct && (
-            <button onClick={() => { setForm({ ...form, product_id: selectedProduct }); setShowForm(true) }}
+          {selectedFolder && (
+            <button onClick={() => { setForm({ name: '', type: 'photo', notes: '', file: null }); setShowForm(true) }}
               style={{ padding: '10px 18px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
               + Ajouter un fichier
             </button>
@@ -166,40 +180,41 @@ export default function Documents() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18, minHeight: 500 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 18, minHeight: 500 }}>
         {/* Sidebar — product folders */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, padding: '0 4px' }}>
-            Dossiers produits ({allProducts.length})
+            Dossiers produits ({folders.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {allProducts.map(p => {
-              const docCount = documents.filter(d => d.product_id === p.id).length
-              const isActive = selectedProduct === p.id
+            {folders.map(f => {
+              const docCount = documents.filter(d => d.product_id === f.id).length
+              const isActive = selectedFolder === f.id
               return (
-                <div key={p.id} style={{ position: 'relative' }}>
-                  <button onClick={() => { setSelectedProduct(p.id); setCategoryFilter('all') }}
-                    style={{ ...box, padding: '14px 16px', cursor: 'pointer', border: isActive ? '2px solid #6366f1' : '1px solid #e8e8e3', background: isActive ? '#6366f108' : '#fff', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 10, background: isActive ? '#6366f115' : '#fafaf8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                <div key={f.id}>
+                  <div
+                    onClick={() => { setSelectedFolder(f.id); setCategoryFilter('all') }}
+                    style={{ ...box, padding: '12px 14px', cursor: 'pointer', border: isActive ? '2px solid #6366f1' : '1px solid #e8e8e3', background: isActive ? '#6366f108' : '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: isActive ? '#6366f115' : '#fafaf8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
                       📁
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{p.asin}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                      {f.asin && <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{f.asin}</div>}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                       <span style={{ fontSize: 16, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e' }}>{docCount}</span>
                       <span style={{ fontSize: 10, color: '#9ca3af' }}>fichiers</span>
                     </div>
-                  </button>
+                  </div>
                   {isActive && (
-                    <div style={{ display: 'flex', gap: 4, marginTop: 4, paddingLeft: 4 }}>
-                      <button onClick={(e) => { e.stopPropagation(); openEditFolder(p) }}
-                        style={{ fontSize: 11, color: '#6366f1', background: '#6366f110', border: '1px solid #6366f125', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, paddingLeft: 52 }}>
+                      <button onClick={() => openEditFolder(f)}
+                        style={{ fontSize: 11, color: '#6366f1', background: '#6366f110', border: '1px solid #6366f130', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 600 }}>
                         ✏️ Modifier
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteFolder(p.id) }}
-                        style={{ fontSize: 11, color: '#ef4444', background: '#ef444410', border: '1px solid #ef444425', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                      <button onClick={() => handleDeleteFolder(f.id)}
+                        style={{ fontSize: 11, color: '#ef4444', background: '#ef444410', border: '1px solid #ef444430', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 600 }}>
                         🗑 Supprimer
                       </button>
                     </div>
@@ -207,7 +222,7 @@ export default function Documents() {
                 </div>
               )
             })}
-            {allProducts.length === 0 && (
+            {folders.length === 0 && (
               <div style={{ ...box, padding: '40px 16px', textAlign: 'center' }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>📁</div>
                 <div style={{ fontSize: 13, color: '#9ca3af' }}>Creez un dossier produit pour commencer</div>
@@ -216,9 +231,9 @@ export default function Documents() {
           </div>
         </div>
 
-        {/* Main content — files inside selected folder */}
+        {/* Main content */}
         <div>
-          {!selectedProduct ? (
+          {!selectedFolder ? (
             <div style={{ ...box, padding: '80px 20px', textAlign: 'center' }}>
               <div style={{ fontSize: 48, marginBottom: 14 }}>📂</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e', marginBottom: 6 }}>Selectionnez un dossier produit</div>
@@ -230,10 +245,10 @@ export default function Documents() {
             <>
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 17, fontWeight: 700, color: '#1a1a2e' }}>
-                  {allProducts.find(p => p.id === selectedProduct)?.name}
+                  {folders.find(f => f.id === selectedFolder)?.name}
                 </div>
                 <div style={{ fontSize: 12, color: '#9ca3af', fontFamily: 'monospace' }}>
-                  {allProducts.find(p => p.id === selectedProduct)?.asin} · {productDocs.length} fichier{productDocs.length !== 1 ? 's' : ''}
+                  {folders.find(f => f.id === selectedFolder)?.asin || ''} · {productDocs.length} fichier{productDocs.length !== 1 ? 's' : ''}
                 </div>
               </div>
 
@@ -259,7 +274,7 @@ export default function Documents() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#fafaf8' }}>
-                      {['Fichier', 'Categorie', 'Notes', 'Date', ''].map(h => (
+                      {['Fichier', 'Categorie', 'Notes', 'Date', 'Actions'].map(h => (
                         <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
                       ))}
                     </tr>
@@ -269,21 +284,25 @@ export default function Documents() {
                       const cfg = CATEGORIES[doc.type] || CATEGORIES.autre
                       const hasFile = !!doc.file_url
                       return (
-                        <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb', cursor: hasFile ? 'pointer' : 'default' }}
+                        <tr key={doc.id} style={{ borderTop: '1px solid #f0f0eb' }}
                           onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                          onClick={() => { if (hasFile) window.open(doc.file_url, '_blank') }}>
+                          onMouseLeave={e => e.currentTarget.style.background = ''}>
                           <td style={{ padding: '12px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <div style={{ width: 36, height: 36, borderRadius: 8, background: `${cfg.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
                                 {cfg.icon}
                               </div>
                               <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span style={{ fontSize: 13, fontWeight: 600, color: hasFile ? '#6366f1' : '#1a1a2e', textDecoration: hasFile ? 'underline' : 'none' }}>{doc.name}</span>
-                                  {hasFile && <span style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>📎</span>}
-                                </div>
-                                {!hasFile && <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>Pas de fichier joint</div>}
+                                {hasFile ? (
+                                  <a href={doc.file_url} target="_blank" rel="noreferrer"
+                                    style={{ fontSize: 13, fontWeight: 600, color: '#6366f1', textDecoration: 'none' }}
+                                    onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                    onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                                    {doc.name} 📎
+                                  </a>
+                                ) : (
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{doc.name}</span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -293,20 +312,20 @@ export default function Documents() {
                             </span>
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: 12, color: '#6b7280', maxWidth: 180 }}>
-                            {doc.notes || <span style={{ color: '#d1d5db' }}>-</span>}
+                            {doc.notes || <span style={{ color: '#d1d5db' }}>—</span>}
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap' }}>
-                            {doc.created_at ? formatDate(doc.created_at) : '-'}
+                            {doc.created_at ? formatDate(doc.created_at) : '—'}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'flex', gap: 8 }}>
                               {hasFile && (
-                                <a href={doc.file_url} download target="_blank" rel="noreferrer"
-                                  style={{ fontSize: 12, color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, textDecoration: 'none' }}>
+                                <a href={doc.file_url} target="_blank" rel="noreferrer"
+                                  style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }}>
                                   Ouvrir
                                 </a>
                               )}
-                              <button onClick={() => handleDelete(doc.id)}
+                              <button onClick={() => handleDeleteDoc(doc)}
                                 style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
                                 Supprimer
                               </button>
@@ -364,10 +383,16 @@ export default function Documents() {
               <label style={lbl}>ASIN Amazon</label>
               <input style={{ ...inp, fontFamily: 'monospace', textTransform: 'uppercase' }} type="text" maxLength={10} value={editingFolder.asin || ''} onChange={e => setEditingFolder({ ...editingFolder, asin: e.target.value })} />
             </div>
-            <button type="submit"
-              style={{ width: '100%', padding: '12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              Enregistrer
-            </button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type="submit"
+                style={{ flex: 1, padding: '12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                Enregistrer
+              </button>
+              <button type="button" onClick={() => { handleDeleteFolder(editingFolder.id); setShowEditFolder(false) }}
+                style={{ padding: '12px 20px', background: '#fff', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                Supprimer
+              </button>
+            </div>
           </form>
         )}
       </Modal>
@@ -375,43 +400,54 @@ export default function Documents() {
       {/* Modal — add file */}
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Ajouter un fichier">
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Fichier</label>
+          <div style={{ marginBottom: 14 }}>
+            <label style={lbl}>Fichier (depuis votre Mac)</label>
             <div
               onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.background = '#6366f108' }}
               onDragLeave={e => { e.currentTarget.style.borderColor = '#e8e8e3'; e.currentTarget.style.background = '#fafaf8' }}
-              onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#e8e8e3'; e.currentTarget.style.background = '#fafaf8'; const f = e.dataTransfer.files[0]; if (f) setForm({ ...form, file: f, name: form.name || f.name.replace(/\.[^.]+$/, '') }) }}
-              style={{ border: '2px dashed #e8e8e3', borderRadius: 10, padding: '18px 14px', textAlign: 'center', background: '#fafaf8', cursor: 'pointer', transition: 'all 0.15s' }}
-              onClick={() => document.getElementById('file-input').click()}
+              onDrop={e => {
+                e.preventDefault()
+                e.currentTarget.style.borderColor = '#e8e8e3'
+                e.currentTarget.style.background = '#fafaf8'
+                const f = e.dataTransfer.files[0]
+                if (f) setForm(prev => ({ ...prev, file: f, name: prev.name || f.name.replace(/\.[^.]+$/, '') }))
+              }}
+              style={{ border: '2px dashed #e8e8e3', borderRadius: 10, padding: '20px 14px', textAlign: 'center', background: '#fafaf8', cursor: 'pointer', transition: 'all 0.15s' }}
+              onClick={() => fileInputRef.current?.click()}
             >
               {form.file ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 16 }}>📎</span>
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{form.file.name}</span>
                   <span style={{ fontSize: 11, color: '#9ca3af' }}>({(form.file.size / 1024 / 1024).toFixed(1)} Mo)</span>
-                  <button type="button" onClick={e => { e.stopPropagation(); setForm({ ...form, file: null }) }}
-                    style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, marginLeft: 4 }}>✕</button>
+                  <button type="button" onClick={e => { e.stopPropagation(); setForm(prev => ({ ...prev, file: null })); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                    style={{ fontSize: 12, color: '#ef4444', background: '#ef444410', border: '1px solid #ef444430', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontWeight: 600 }}>✕ Retirer</button>
                 </div>
               ) : (
                 <div>
-                  <div style={{ fontSize: 24, marginBottom: 4 }}>📤</div>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>Glissez un fichier ici ou <span style={{ color: '#6366f1', fontWeight: 600 }}>parcourir</span></div>
-                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>PDF, images, videos, documents — max 50 Mo</div>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>📤</div>
+                  <div style={{ fontSize: 13, color: '#1a1a2e', fontWeight: 600 }}>Glissez un fichier ici</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>ou <span style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'underline' }}>cliquez pour parcourir</span></div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>PDF, images, videos, documents — max 50 Mo</div>
                 </div>
               )}
-              <input id="file-input" type="file" style={{ display: 'none' }}
-                onChange={e => { const f = e.target.files[0]; if (f) setForm({ ...form, file: f, name: form.name || f.name.replace(/\.[^.]+$/, '') }) }} />
+              <input ref={fileInputRef} type="file" style={{ display: 'none' }}
+                accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar"
+                onChange={e => {
+                  const f = e.target.files?.[0]
+                  if (f) setForm(prev => ({ ...prev, file: f, name: prev.name || f.name.replace(/\.[^.]+$/, '') }))
+                }} />
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={lbl}>Nom du fichier *</label>
-            <input style={inp} type="text" placeholder="Ex: Photo principale HD" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+            <input style={inp} type="text" placeholder="Ex: Photo principale HD" value={form.name} onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))} required />
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={lbl}>Categorie *</label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
               {Object.entries(CATEGORIES).map(([type, cfg]) => (
-                <button key={type} type="button" onClick={() => setForm({ ...form, type })}
+                <button key={type} type="button" onClick={() => setForm(prev => ({ ...prev, type }))}
                   style={{ padding: '10px 6px', borderRadius: 8, border: `1px solid ${form.type === type ? cfg.color : '#e8e8e3'}`, background: form.type === type ? `${cfg.color}15` : '#fafaf8', color: form.type === type ? cfg.color : '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}>
                   <span style={{ fontSize: 16 }}>{cfg.icon}</span>
                   <div style={{ marginTop: 2 }}>{cfg.label}</div>
@@ -421,11 +457,11 @@ export default function Documents() {
           </div>
           <div style={{ marginBottom: 20 }}>
             <label style={lbl}>Notes</label>
-            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Description, details..." />
+            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} placeholder="Description, details..." />
           </div>
           <button type="submit" disabled={saving}
             style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Ajout...' : 'Ajouter le fichier'}
+            {saving ? 'Upload en cours...' : 'Ajouter le fichier'}
           </button>
         </form>
       </Modal>
