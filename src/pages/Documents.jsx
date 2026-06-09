@@ -50,6 +50,8 @@ export default function Documents() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ name: '', type: 'photo', notes: '', product_id: '' })
   const [folderForm, setFolderForm] = useState({ name: '', asin: '' })
+  const [editingFolder, setEditingFolder] = useState(null)
+  const [showEditFolder, setShowEditFolder] = useState(false)
   const [useMock, setUseMock] = useState(false)
   const [localProducts, setLocalProducts] = useState([])
 
@@ -80,6 +82,27 @@ export default function Documents() {
     setFolderForm({ name: '', asin: '' })
     setShowFolderForm(false)
     setSelectedProduct(newP.id)
+  }
+
+  const openEditFolder = (p) => {
+    setEditingFolder({ ...p })
+    setShowEditFolder(true)
+  }
+
+  const saveEditFolder = (e) => {
+    e.preventDefault()
+    setLocalProducts(prev => prev.map(p => p.id === editingFolder.id ? editingFolder : p))
+    setProducts(prev => prev.map(p => p.id === editingFolder.id ? editingFolder : p))
+    setShowEditFolder(false)
+    setEditingFolder(null)
+  }
+
+  const deleteFolder = (id) => {
+    if (!confirm('Supprimer ce dossier et tous ses documents ?')) return
+    setLocalProducts(prev => prev.filter(p => p.id !== id))
+    setProducts(prev => prev.filter(p => p.id !== id))
+    setDocuments(prev => prev.filter(d => d.product_id !== id))
+    if (selectedProduct === id) setSelectedProduct(null)
   }
 
   const handleSubmit = async (e) => {
@@ -145,20 +168,34 @@ export default function Documents() {
               const docCount = documents.filter(d => d.product_id === p.id).length
               const isActive = selectedProduct === p.id
               return (
-                <button key={p.id} onClick={() => { setSelectedProduct(p.id); setCategoryFilter('all') }}
-                  style={{ ...box, padding: '14px 16px', cursor: 'pointer', border: isActive ? '2px solid #6366f1' : '1px solid #e8e8e3', background: isActive ? '#6366f108' : '#fff', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 42, height: 42, borderRadius: 10, background: isActive ? '#6366f115' : '#fafaf8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-                    📁
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{p.asin}</div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e' }}>{docCount}</span>
-                    <span style={{ fontSize: 10, color: '#9ca3af' }}>fichiers</span>
-                  </div>
-                </button>
+                <div key={p.id} style={{ position: 'relative' }}>
+                  <button onClick={() => { setSelectedProduct(p.id); setCategoryFilter('all') }}
+                    style={{ ...box, padding: '14px 16px', cursor: 'pointer', border: isActive ? '2px solid #6366f1' : '1px solid #e8e8e3', background: isActive ? '#6366f108' : '#fff', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 10, background: isActive ? '#6366f115' : '#fafaf8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      📁
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{p.asin}</div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: isActive ? '#6366f1' : '#1a1a2e' }}>{docCount}</span>
+                      <span style={{ fontSize: 10, color: '#9ca3af' }}>fichiers</span>
+                    </div>
+                  </button>
+                  {isActive && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: 4, paddingLeft: 4 }}>
+                      <button onClick={(e) => { e.stopPropagation(); openEditFolder(p) }}
+                        style={{ fontSize: 11, color: '#6366f1', background: '#6366f110', border: '1px solid #6366f125', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                        ✏️ Modifier
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteFolder(p.id) }}
+                        style={{ fontSize: 11, color: '#ef4444', background: '#ef444410', border: '1px solid #ef444425', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                        🗑 Supprimer
+                      </button>
+                    </div>
+                  )}
+                </div>
               )
             })}
             {allProducts.length === 0 && (
@@ -288,6 +325,26 @@ export default function Documents() {
             Creer le dossier
           </button>
         </form>
+      </Modal>
+
+      {/* Modal — edit folder */}
+      <Modal isOpen={showEditFolder} onClose={() => setShowEditFolder(false)} title="Modifier le dossier">
+        {editingFolder && (
+          <form onSubmit={saveEditFolder}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={lbl}>Nom du produit *</label>
+              <input style={inp} type="text" value={editingFolder.name} onChange={e => setEditingFolder({ ...editingFolder, name: e.target.value })} required />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lbl}>ASIN Amazon</label>
+              <input style={{ ...inp, fontFamily: 'monospace', textTransform: 'uppercase' }} type="text" maxLength={10} value={editingFolder.asin || ''} onChange={e => setEditingFolder({ ...editingFolder, asin: e.target.value })} />
+            </div>
+            <button type="submit"
+              style={{ width: '100%', padding: '12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+              Enregistrer
+            </button>
+          </form>
+        )}
       </Modal>
 
       {/* Modal — add file */}
