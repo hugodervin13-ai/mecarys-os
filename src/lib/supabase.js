@@ -223,6 +223,69 @@ export const deleteDocument = async (id) => {
   return { data, error }
 }
 
+// --- Reviews (Qualité & SAV) ---
+export const getReviews = async (userId) => {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('*, products(name, asin)')
+    .eq('user_id', userId)
+    .order('review_date', { ascending: false })
+    .limit(500)
+  return { data, error }
+}
+
+export const addReview = async (userId, review) => {
+  const { data, error } = await supabase
+    .from('reviews')
+    .insert([{ ...review, user_id: userId }])
+    .select()
+  return { data, error }
+}
+
+export const updateReview = async (id, updates) => {
+  const { data, error } = await supabase
+    .from('reviews')
+    .update(updates)
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
+export const deleteReview = async (id) => {
+  const { data, error } = await supabase
+    .from('reviews')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
+// --- Returns (Qualité & SAV) ---
+export const getReturns = async (userId) => {
+  const { data, error } = await supabase
+    .from('returns')
+    .select('*, products(name, asin)')
+    .eq('user_id', userId)
+    .order('return_date', { ascending: false })
+    .limit(500)
+  return { data, error }
+}
+
+export const addReturn = async (userId, ret) => {
+  const { data, error } = await supabase
+    .from('returns')
+    .insert([{ ...ret, user_id: userId }])
+    .select()
+  return { data, error }
+}
+
+export const deleteReturn = async (id) => {
+  const { data, error } = await supabase
+    .from('returns')
+    .delete()
+    .eq('id', id)
+  return { data, error }
+}
+
 export const uploadFile = async (userId, file) => {
   const path = `${userId}/${Date.now()}_${file.name}`
   const { data, error } = await supabase.storage
