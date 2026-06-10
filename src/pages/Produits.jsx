@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
 import { addProduct, getProducts, deleteProduct, updateProduct } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { useData, mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
 import { formatCurrency, formatNumber } from '../lib/utils'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
-
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { display: 'block', fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.5 }
 
 const EMPTY_FORM = { asin: '', name: '', price_current: '', cost: '', stock_fba: '', stock_alerte: '20', rating: '', reviews_count: '', units_sold_30d: '', revenue_30d: '', profit_30d: '', acos: '', status: 'active' }
 
@@ -36,8 +34,8 @@ function StockBar({ stock, alerte }) {
 
 export default function Produits() {
   const { user, setProducts: setStoreProducts } = useStore()
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { data: productsData, loading, reload } = useData('products', () => getProducts(user.id), [user])
+  const products = productsData || []
   const [showForm, setShowForm] = useState(false)
   const [editProduct, setEditProduct] = useState(null)
   const [search, setSearch] = useState('')
@@ -46,14 +44,7 @@ export default function Produits() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const { data } = await getProducts(user.id)
-    setProducts(data || [])
-    setStoreProducts(data || [])
-    setLoading(false)
-  }
+  useEffect(() => { if (productsData) setStoreProducts(productsData) }, [productsData, setStoreProducts])
 
   const openAdd = () => { setEditProduct(null); setForm(EMPTY_FORM); setShowForm(true) }
   const openEdit = (p) => {
@@ -69,17 +60,17 @@ export default function Produits() {
     for (const [k, v] of Object.entries(form)) {
       if (v !== '') d[k] = ['asin', 'name', 'status'].includes(k) ? v : Number(v)
     }
-    if (editProduct) await updateProduct(editProduct.id, d)
-    else await addProduct(user.id, d)
-    setShowForm(false)
+    const ok = editProduct
+      ? await mutate(() => updateProduct(editProduct.id, d), 'products', 'Produit modifié')
+      : await mutate(() => addProduct(user.id, d), 'products', 'Produit ajouté')
     setSaving(false)
-    loadData()
+    if (ok) { setShowForm(false); reload() }
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Supprimer ce produit ?')) return
-    await deleteProduct(id)
-    loadData()
+    const ok = await mutate(() => deleteProduct(id), 'products', 'Produit supprimé')
+    if (ok) reload()
   }
 
   const totalRevenue = products.reduce((a, p) => a + (p.revenue_30d || 0), 0)
@@ -128,7 +119,7 @@ export default function Produits() {
           { label: 'Produits actifs', value: products.filter(p => p.status === 'active').length, icon: '📦', color: '#6366f1' },
           { label: 'CA total (30j)', value: formatCurrency(totalRevenue), icon: '💰', color: '#f59e0b', sub: totalRevenue > 0 ? null : 'Renseignez les CA dans vos produits' },
           { label: 'Profit net (30j)', value: formatCurrency(totalProfit), icon: '📈', color: '#10b981', sub: totalProfit > 0 ? `Marge: ${avgMargin}%` : null },
-          { label: 'Stock critique', value: criticalCount, icon: '⚠️', color: criticalCount > 0 ? '#ef4444' : '#10b981', sub: criticalCount > 0 ? 'Reapprovisionnement urgent' : 'Tout est OK' },
+          { label: 'Stock critique', value: criticalCount, icon: '⚠️', color: criticalCount > 0 ? '#ef4444' : '#10b981', sub: criticalCount > 0 ? 'Réapprovisionnement urgent' : 'Tout est OK' },
         ].map(k => (
           <div key={k.label} style={{ ...box, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -173,7 +164,7 @@ export default function Produits() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['Produit', 'Prix / Cout / Marge', 'Stock FBA', 'Ventes 30j', 'Profit 30j', 'ACOS', 'Note', 'Statut', 'Actions'].map(h => (
+              {['Produit', 'Prix / Coût / Marge', 'Stock FBA', 'Ventes 30j', 'Profit 30j', 'ACOS', 'Note', 'Statut', 'Actions'].map(h => (
                 <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -202,7 +193,7 @@ export default function Produits() {
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{formatCurrency(p.revenue_30d || 0)}</div>
-                    <div style={{ fontSize: 11, color: '#9ca3af' }}>{formatNumber(p.units_sold_30d || 0)} unites</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af' }}>{formatNumber(p.units_sold_30d || 0)} unités</div>
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: (p.profit_30d || 0) >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(p.profit_30d || 0)}</div>
@@ -227,7 +218,7 @@ export default function Produits() {
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => openEdit(p)} style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, background: '#6366f110', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Editer</button>
+                      <button onClick={() => openEdit(p)} style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, background: '#6366f110', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Éditer</button>
                       <button onClick={() => handleDelete(p.id)} style={{ fontSize: 12, color: '#ef4444', background: '#ef444410', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Suppr.</button>
                     </div>
                   </td>
@@ -239,7 +230,7 @@ export default function Produits() {
         {filtered.length === 0 && (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>📦</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>{search ? 'Aucun produit trouve' : 'Aucun produit pour le moment'}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>{search ? 'Aucun produit trouvé' : 'Aucun produit pour le moment'}</div>
             <div style={{ fontSize: 13, color: '#9ca3af' }}>{search ? 'Essayez un autre terme de recherche' : 'Cliquez sur "+ Ajouter un produit" pour commencer'}</div>
           </div>
         )}
@@ -266,7 +257,7 @@ export default function Produits() {
             <input style={inp} type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Kit ampoules H7 LED..." required />
           </div>
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Prix & Rentabilite</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Prix & Rentabilité</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
               <div><label style={lbl}>Prix de vente (€)</label><input style={inp} type="number" step="0.01" value={form.price_current} onChange={e => setForm({...form, price_current: e.target.value})} placeholder="29.99" /></div>
               <div><label style={lbl}>Prix de revient (€)</label><input style={inp} type="number" step="0.01" value={form.cost} onChange={e => setForm({...form, cost: e.target.value})} placeholder="8.50" /></div>
@@ -288,7 +279,7 @@ export default function Produits() {
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 14, marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Performances 30 jours</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-              <div><label style={lbl}>Unites vendues</label><input style={inp} type="number" value={form.units_sold_30d} onChange={e => setForm({...form, units_sold_30d: e.target.value})} placeholder="120" /></div>
+              <div><label style={lbl}>Unités vendues</label><input style={inp} type="number" value={form.units_sold_30d} onChange={e => setForm({...form, units_sold_30d: e.target.value})} placeholder="120" /></div>
               <div><label style={lbl}>CA (€)</label><input style={inp} type="number" step="0.01" value={form.revenue_30d} onChange={e => setForm({...form, revenue_30d: e.target.value})} placeholder="3598" /></div>
               <div><label style={lbl}>Profit net (€)</label><input style={inp} type="number" step="0.01" value={form.profit_30d} onChange={e => setForm({...form, profit_30d: e.target.value})} placeholder="950" /></div>
               <div><label style={lbl}>Nb avis</label><input style={inp} type="number" value={form.reviews_count} onChange={e => setForm({...form, reviews_count: e.target.value})} placeholder="342" /></div>

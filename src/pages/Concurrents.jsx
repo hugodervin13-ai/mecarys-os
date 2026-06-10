@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getAllCompetitors, addCompetitor, deleteCompetitor, getProducts } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { useData, mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
 import { formatCurrency } from '../lib/utils'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
-
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
 
 function Stars({ rating }) {
   return (
@@ -22,29 +20,21 @@ function Stars({ rating }) {
 
 export default function Concurrents() {
   const { user } = useStore()
-  const [competitors, setCompetitors] = useState([])
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { data: competitorsData, loading, reload } = useData('competitors', () => getAllCompetitors(user.id), [user])
+  const { data: productsData } = useData('products', () => getProducts(user.id), [user])
+  const competitors = competitorsData || []
+  const products = productsData || []
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [filterProduct, setFilterProduct] = useState('all')
   const [form, setForm] = useState({ product_id: '', competitor_asin: '', competitor_name: '', competitor_price: '', competitor_rating: '' })
-
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const [compRes, prodRes] = await Promise.all([getAllCompetitors(user.id), getProducts(user.id)])
-    setCompetitors(compRes.data || [])
-    setProducts(prodRes.data || [])
-    setLoading(false)
-  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
     const product = products.find(p => p.id === form.product_id)
     const competitorPrice = Number(form.competitor_price)
-    await addCompetitor({
+    const ok = await mutate(() => addCompetitor({
       product_id: form.product_id,
       competitor_asin: form.competitor_asin.toUpperCase(),
       competitor_name: form.competitor_name,
@@ -52,17 +42,19 @@ export default function Concurrents() {
       competitor_rating: Number(form.competitor_rating) || 0,
       price_difference: product ? Math.round(((product.price_current || 0) - competitorPrice) * 100) / 100 : 0,
       tracked_date: new Date().toISOString(),
-    })
-    setForm({ product_id: '', competitor_asin: '', competitor_name: '', competitor_price: '', competitor_rating: '' })
-    setShowForm(false)
+    }), 'competitors', 'Concurrent ajouté')
     setSaving(false)
-    loadData()
+    if (ok) {
+      setForm({ product_id: '', competitor_asin: '', competitor_name: '', competitor_price: '', competitor_rating: '' })
+      setShowForm(false)
+      reload()
+    }
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Supprimer ce concurrent ?')) return
-    await deleteCompetitor(id)
-    loadData()
+    const ok = await mutate(() => deleteCompetitor(id), 'competitors', 'Concurrent supprimé')
+    if (ok) reload()
   }
 
   const filtered = filterProduct === 'all' ? competitors : competitors.filter(c => c.product_id === filterProduct)
@@ -77,7 +69,7 @@ export default function Concurrents() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Veille Concurrentielle</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Surveillez vos concurrents et ajustez votre strategie prix</p>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Surveillez vos concurrents et ajustez votre stratégie prix</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -90,17 +82,17 @@ export default function Concurrents() {
           <span style={{ fontSize: 20 }}>⚠️</span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>{cheaper} concurrent{cheaper > 1 ? 's sont' : ' est'} moins cher que vous</div>
-            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Analysez leurs prix et ajustez votre strategie tarifaire pour rester competitif</div>
+            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Analysez leurs prix et ajustez votre stratégie tarifaire pour rester compétitif</div>
           </div>
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
         {[
-          { label: 'Concurrents suivis', value: competitors.length, icon: '🎯', color: '#6366f1', sub: `${products.length} produit${products.length !== 1 ? 's' : ''} surveilles` },
-          { label: 'Prix moyen concurrent', value: avgPrice > 0 ? formatCurrency(avgPrice) : '-', icon: '💰', color: '#3b82f6', sub: 'Moyenne du marche' },
+          { label: 'Concurrents suivis', value: competitors.length, icon: '🎯', color: '#6366f1', sub: `${products.length} produit${products.length !== 1 ? 's' : ''} surveillés` },
+          { label: 'Prix moyen concurrent', value: avgPrice > 0 ? formatCurrency(avgPrice) : '-', icon: '💰', color: '#3b82f6', sub: 'Moyenne du marché' },
           { label: 'Note moyenne', value: avgRating > 0 ? avgRating.toFixed(1) + ' ★' : '-', icon: '⭐', color: '#f59e0b', sub: 'Note concurrents' },
-          { label: 'Plus bas que vous', value: cheaper, icon: '📉', color: cheaper > 0 ? '#ef4444' : '#10b981', sub: cheaper > 0 ? 'Menace prix' : 'Vous etes competitif' },
+          { label: 'Plus bas que vous', value: cheaper, icon: '📉', color: cheaper > 0 ? '#ef4444' : '#10b981', sub: cheaper > 0 ? 'Menace prix' : 'Vous êtes compétitif' },
         ].map(k => (
           <div key={k.label} style={{ ...box, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -134,7 +126,7 @@ export default function Concurrents() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['Concurrent (ASIN)', 'Nom du produit', 'Prix', 'Note', 'Ecart vs vous', 'Votre produit', 'Actions'].map(h => (
+              {['Concurrent (ASIN)', 'Nom du produit', 'Prix', 'Note', 'Écart vs vous', 'Votre produit', 'Actions'].map(h => (
                 <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -197,7 +189,7 @@ export default function Concurrents() {
           <div style={{ marginBottom: 12 }}>
             <label style={lbl}>Votre produit *</label>
             <select style={inp} value={form.product_id} onChange={e => setForm({ ...form, product_id: e.target.value })} required>
-              <option value="">-- Selectionner votre produit --</option>
+              <option value="">-- Sélectionner votre produit --</option>
               {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.asin})</option>)}
             </select>
           </div>

@@ -1,17 +1,15 @@
 import { useEffect, useState, useRef } from 'react'
 import { getDocuments, addDocument, deleteDocument, getProducts, uploadFile } from '../lib/supabase'
-import { useStore } from '../lib/store'
+import { useStore, toast } from '../lib/store'
+import { useData, mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
 import { formatDate } from '../lib/utils'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
-
 const CATEGORIES = {
   photo:       { label: 'Photos produit',    icon: '📸', color: '#6366f1' },
-  video:       { label: 'Videos',            icon: '🎬', color: '#ec4899' },
+  video:       { label: 'Vidéos',            icon: '🎬', color: '#ec4899' },
   facture:     { label: 'Factures',          icon: '🧾', color: '#10b981' },
   certificat:  { label: 'Certificats',       icon: '📜', color: '#f59e0b' },
   commande:    { label: 'Bons de commande',  icon: '📋', color: '#3b82f6' },
@@ -23,9 +21,11 @@ const CATEGORIES = {
 
 export default function Documents() {
   const { user } = useStore()
+  const { data: docsData, loading: docsLoading, reload: reloadDocs } = useData('documents', () => getDocuments(user.id), [user])
+  const { data: prodData, loading: prodLoading } = useData('products', () => getProducts(user.id), [user])
+  const loading = docsLoading || prodLoading
   const [documents, setDocuments] = useState([])
   const [folders, setFolders] = useState([])
-  const [loading, setLoading] = useState(true)
   const [selectedFolder, setSelectedFolder] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [showForm, setShowForm] = useState(false)
@@ -37,22 +37,20 @@ export default function Documents() {
   const [editingFolder, setEditingFolder] = useState(null)
   const fileInputRef = useRef(null)
 
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const [docRes, prodRes] = await Promise.all([getDocuments(user.id), getProducts(user.id)])
+  // Fusion Supabase + localStorage (système hybride conservé)
+  useEffect(() => {
+    if (!user) return
     const savedFolders = JSON.parse(localStorage.getItem(`mecarys_folders_${user.id}`) || '[]')
     const savedDocs = JSON.parse(localStorage.getItem(`mecarys_docs_${user.id}`) || '[]')
 
-    const supaFolders = (prodRes.data || []).map(p => ({ ...p, source: 'supabase' }))
+    const supaFolders = (prodData || []).map(p => ({ ...p, source: 'supabase' }))
     const localFolders = savedFolders.map(f => ({ ...f, source: 'local' }))
     setFolders([...supaFolders, ...localFolders])
 
-    const supaDocs = (docRes.data || []).map(d => ({ ...d, source: 'supabase' }))
+    const supaDocs = (docsData || []).map(d => ({ ...d, source: 'supabase' }))
     const localDocs = savedDocs.map(d => ({ ...d, source: 'local' }))
     setDocuments([...supaDocs, ...localDocs])
-    setLoading(false)
-  }
+  }, [user, prodData, docsData])
 
   const saveFoldersLocal = (newFolders) => {
     const localOnly = newFolders.filter(f => f.source === 'local')
@@ -112,8 +110,9 @@ export default function Documents() {
       if (uploadRes.data?.url) {
         fileUrl = uploadRes.data.url
       } else if (uploadRes.error) {
-        // Fallback: create object URL for local preview
+        // Fallback : URL locale temporaire pour la prévisualisation
         fileUrl = URL.createObjectURL(form.file)
+        toast('Upload Supabase échoué, fichier stocké temporairement en local', 'info')
       }
     }
 
@@ -127,8 +126,8 @@ export default function Documents() {
 
     const folder = folders.find(f => f.id === selectedFolder)
     if (folder?.source === 'supabase' && fileUrl && !fileUrl.startsWith('blob:')) {
-      await addDocument(user.id, docData)
-      await loadData()
+      const ok = await mutate(() => addDocument(user.id, docData), 'documents', 'Fichier ajouté')
+      if (ok) reloadDocs()
     } else {
       const newDoc = { ...docData, id: `doc_${Date.now()}`, created_at: new Date().toISOString(), source: 'local' }
       const updated = [newDoc, ...documents]
@@ -145,8 +144,8 @@ export default function Documents() {
   const handleDeleteDoc = async (doc) => {
     if (!confirm('Supprimer ce document ?')) return
     if (doc.source === 'supabase') {
-      await deleteDocument(doc.id)
-      await loadData()
+      const ok = await mutate(() => deleteDocument(doc.id), 'documents', 'Document supprimé')
+      if (ok) reloadDocs()
     } else {
       const updated = documents.filter(d => d.id !== doc.id)
       setDocuments(updated)
@@ -164,12 +163,12 @@ export default function Documents() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Documents produits</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Organisez tous vos fichiers par produit : photos, videos, factures, certificats...</p>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Organisez tous vos fichiers par produit : photos, vidéos, factures, certificats...</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowFolderForm(true)}
             style={{ padding: '10px 18px', background: '#fff', color: '#6366f1', border: '1px solid #6366f1', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-            + Creer un dossier
+            + Créer un dossier
           </button>
           {selectedFolder && (
             <button onClick={() => { setForm({ name: '', type: 'photo', notes: '', file: null }); setShowForm(true) }}
@@ -225,7 +224,7 @@ export default function Documents() {
             {folders.length === 0 && (
               <div style={{ ...box, padding: '40px 16px', textAlign: 'center' }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>📁</div>
-                <div style={{ fontSize: 13, color: '#9ca3af' }}>Creez un dossier produit pour commencer</div>
+                <div style={{ fontSize: 13, color: '#9ca3af' }}>Créez un dossier produit pour commencer</div>
               </div>
             )}
           </div>
@@ -236,9 +235,9 @@ export default function Documents() {
           {!selectedFolder ? (
             <div style={{ ...box, padding: '80px 20px', textAlign: 'center' }}>
               <div style={{ fontSize: 48, marginBottom: 14 }}>📂</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e', marginBottom: 6 }}>Selectionnez un dossier produit</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e', marginBottom: 6 }}>Sélectionnez un dossier produit</div>
               <div style={{ fontSize: 13, color: '#9ca3af', maxWidth: 380, margin: '0 auto' }}>
-                Choisissez un produit dans la liste a gauche pour voir et gerer ses documents (photos, videos, factures, certificats, etc.)
+                Choisissez un produit dans la liste à gauche pour voir et gérer ses documents (photos, vidéos, factures, certificats, etc.)
               </div>
             </div>
           ) : (
@@ -274,7 +273,7 @@ export default function Documents() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#fafaf8' }}>
-                      {['Fichier', 'Categorie', 'Notes', 'Date', 'Actions'].map(h => (
+                      {['Fichier', 'Catégorie', 'Notes', 'Date', 'Actions'].map(h => (
                         <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
                       ))}
                     </tr>
@@ -354,7 +353,7 @@ export default function Documents() {
       </div>
 
       {/* Modal — create folder */}
-      <Modal isOpen={showFolderForm} onClose={() => setShowFolderForm(false)} title="Creer un dossier produit">
+      <Modal isOpen={showFolderForm} onClose={() => setShowFolderForm(false)} title="Créer un dossier produit">
         <form onSubmit={createFolder}>
           <div style={{ marginBottom: 12 }}>
             <label style={lbl}>Nom du produit *</label>
@@ -366,7 +365,7 @@ export default function Documents() {
           </div>
           <button type="submit"
             style={{ width: '100%', padding: '12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-            Creer le dossier
+            Créer le dossier
           </button>
         </form>
       </Modal>
@@ -428,7 +427,7 @@ export default function Documents() {
                   <div style={{ fontSize: 28, marginBottom: 6 }}>📤</div>
                   <div style={{ fontSize: 13, color: '#1a1a2e', fontWeight: 600 }}>Glissez un fichier ici</div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>ou <span style={{ color: '#6366f1', fontWeight: 600, textDecoration: 'underline' }}>cliquez pour parcourir</span></div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>PDF, images, videos, documents — max 50 Mo</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>PDF, images, vidéos, documents — max 50 Mo</div>
                 </div>
               )}
               <input ref={fileInputRef} type="file" style={{ display: 'none' }}
@@ -444,7 +443,7 @@ export default function Documents() {
             <input style={inp} type="text" placeholder="Ex: Photo principale HD" value={form.name} onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))} required />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Categorie *</label>
+            <label style={lbl}>Catégorie *</label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
               {Object.entries(CATEGORIES).map(([type, cfg]) => (
                 <button key={type} type="button" onClick={() => setForm(prev => ({ ...prev, type }))}
@@ -457,7 +456,7 @@ export default function Documents() {
           </div>
           <div style={{ marginBottom: 20 }}>
             <label style={lbl}>Notes</label>
-            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} placeholder="Description, details..." />
+            <textarea style={{ ...inp, resize: 'none' }} value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} placeholder="Description, détails..." />
           </div>
           <button type="submit" disabled={saving}
             style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>

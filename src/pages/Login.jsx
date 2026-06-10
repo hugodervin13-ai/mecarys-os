@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { signIn, signUp } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { colors, lbl } from '../lib/theme'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -27,7 +28,7 @@ export default function Login() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f5f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+    <div style={{ minHeight: '100vh', background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div style={{ width: '100%', maxWidth: 400 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -39,7 +40,7 @@ export default function Login() {
             <span style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.5px' }}>MECARYS OS</span>
           </div>
           <p style={{ fontSize: 13, color: '#9ca3af' }}>
-            {isSignUp ? 'Creez votre compte pour commencer' : 'Connectez-vous a votre espace'}
+            {isSignUp ? 'Créez votre compte pour commencer' : 'Connectez-vous à votre espace'}
           </p>
         </div>
 
@@ -52,7 +53,7 @@ export default function Login() {
 
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', color: '#6b7280', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Email</label>
+              <label style={lbl}>Email</label>
               <input
                 type="email"
                 placeholder="votre@email.com"
@@ -63,7 +64,7 @@ export default function Login() {
               />
             </div>
             <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', color: '#6b7280', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Mot de passe</label>
+              <label style={lbl}>Mot de passe</label>
               <input
                 type="password"
                 placeholder="••••••••"
@@ -87,7 +88,7 @@ export default function Login() {
               onClick={() => { setIsSignUp(!isSignUp); setError('') }}
               style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}
             >
-              {isSignUp ? "J'ai deja un compte" : "Creer un compte"}
+              {isSignUp ? "J'ai déjà un compte" : "Créer un compte"}
             </button>
           </div>
         </div>
