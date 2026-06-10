@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { getSuppliers, addSupplier, deleteSupplier } from '../lib/supabase'
-import { useStore } from '../lib/store'
+import { useStore, toast } from '../lib/store'
+import { mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
+import { DemoBadge, KpiCard, EmptyState } from '../components/ui'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
-
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
 
 const COUNTRY_FLAGS = {
   'Chine': '🇨🇳', 'China': '🇨🇳',
@@ -39,6 +38,7 @@ export default function Fournisseurs() {
   const loadData = async () => {
     const { data, error } = await getSuppliers(user.id)
     if (error || !data || data.length === 0) {
+      if (error) toast(`Erreur de chargement : ${error.message || 'réessayez plus tard'}`)
       setSuppliers(mockSuppliers)
       setUseMock(true)
     } else {
@@ -54,8 +54,8 @@ export default function Fournisseurs() {
     if (useMock) {
       setSuppliers(prev => [...prev, { ...form, id: `m${Date.now()}`, created_at: new Date().toISOString() }])
     } else {
-      await addSupplier(user.id, form)
-      await loadData()
+      const ok = await mutate(() => addSupplier(user.id, form), 'suppliers')
+      if (ok) await loadData()
     }
     setForm({ name: '', country: '', contact_email: '', phone: '', status: 'active' })
     setShowForm(false)
@@ -67,8 +67,8 @@ export default function Fournisseurs() {
     if (useMock || String(id).startsWith('m')) {
       setSuppliers(prev => prev.filter(s => s.id !== id))
     } else {
-      await deleteSupplier(id)
-      loadData()
+      const ok = await mutate(() => deleteSupplier(id), 'suppliers')
+      if (ok) loadData()
     }
   }
 
@@ -82,8 +82,11 @@ export default function Fournisseurs() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Fournisseurs</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Gerez votre carnet de fournisseurs et leurs coordonnees</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Fournisseurs</h1>
+            {useMock && <DemoBadge />}
+          </div>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Gérez votre carnet de fournisseurs et leurs coordonnées</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -92,23 +95,10 @@ export default function Fournisseurs() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
-        {[
-          { label: 'Total fournisseurs', value: suppliers.length, icon: '🏭', color: '#6366f1', sub: 'Dans votre carnet' },
-          { label: 'Fournisseurs actifs', value: active, icon: '✅', color: '#10b981', sub: 'En activite' },
-          { label: 'Inactifs', value: suppliers.length - active, icon: '💤', color: '#9ca3af', sub: 'Archive' },
-          { label: 'Pays', value: countries, icon: '🌍', color: '#3b82f6', sub: 'Diversification' },
-        ].map(k => (
-          <div key={k.label} style={{ ...box, padding: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{k.label}</p>
-                <p style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e' }}>{k.value}</p>
-                <p style={{ fontSize: 11, color: k.color, marginTop: 4, fontWeight: 500 }}>{k.sub}</p>
-              </div>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
-            </div>
-          </div>
-        ))}
+        <KpiCard label="Total fournisseurs" value={suppliers.length} icon="🏭" color="#6366f1" sub="Dans votre carnet" />
+        <KpiCard label="Fournisseurs actifs" value={active} icon="✅" color="#10b981" sub="En activité" />
+        <KpiCard label="Inactifs" value={suppliers.length - active} icon="💤" color="#9ca3af" sub="Archivés" />
+        <KpiCard label="Pays" value={countries} icon="🌍" color="#3b82f6" sub="Diversification" />
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
@@ -160,10 +150,8 @@ export default function Fournisseurs() {
           </div>
         ))}
         {filtered.length === 0 && (
-          <div style={{ gridColumn: '1 / -1', ...box, padding: '60px 20px', textAlign: 'center' }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🏭</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Aucun fournisseur</div>
-            <div style={{ fontSize: 13, color: '#9ca3af' }}>Ajoutez vos fournisseurs pour centraliser leurs coordonnees</div>
+          <div style={{ gridColumn: '1 / -1', ...box }}>
+            <EmptyState icon="🏭" title="Aucun fournisseur" subtitle="Ajoutez vos fournisseurs pour centraliser leurs coordonnées" />
           </div>
         )}
       </div>
@@ -193,7 +181,7 @@ export default function Fournisseurs() {
               <input style={inp} type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} required />
             </div>
             <div>
-              <label style={lbl}>Telephone</label>
+              <label style={lbl}>Téléphone</label>
               <input style={inp} type="text" placeholder="+86 755 ..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
             </div>
           </div>

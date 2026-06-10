@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getProducts } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { useData } from '../lib/useData'
 import { formatCurrency, formatNumber } from '../lib/utils'
+import { box } from '../lib/theme'
+import { DemoBadge } from '../components/ui'
 import Loading from '../components/Loading'
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
-
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
 
 const DATA = {
   '7j': {
@@ -46,17 +47,10 @@ const TOOLTIP_STYLE = { backgroundColor: '#ffffff', border: '1px solid #e8e8e3',
 
 export default function VentesProfit() {
   const { user } = useStore()
-  const [loading, setLoading] = useState(true)
-  const [products, setProducts] = useState([])
   const [period, setPeriod] = useState('30j')
 
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const { data } = await getProducts(user.id)
-    setProducts(data || [])
-    setLoading(false)
-  }
+  const { data: productsData, loading } = useData('products', () => getProducts(user.id), [user])
+  const products = productsData || []
 
   const d = DATA[period]
   const totalCA = products.reduce((a, p) => a + (p.revenue_30d || 0), 0) || d.ca
@@ -68,9 +62,9 @@ export default function VentesProfit() {
   if (loading) return <Loading />
 
   const kpis = [
-    { label: `CA total (${period})`, value: formatCurrency(totalCA), change: +22.8, icon: '💰', color: '#6366f1', sub: `${formatNumber(totalUnits)} unites vendues` },
+    { label: `CA total (${period})`, value: formatCurrency(totalCA), change: +22.8, icon: '💰', color: '#6366f1', sub: `${formatNumber(totalUnits)} unités vendues` },
     { label: `Profit net (${period})`, value: formatCurrency(totalProfit), change: +16.7, icon: '📈', color: '#10b981', sub: `Marge ${margin}%` },
-    { label: 'Marge nette', value: `${margin}%`, change: +2.4, icon: '📊', color: '#3b82f6', sub: margin >= 20 ? 'Bonne marge' : 'A optimiser' },
+    { label: 'Marge nette', value: `${margin}%`, change: +2.4, icon: '📊', color: '#3b82f6', sub: margin >= 20 ? 'Bonne marge' : 'À optimiser' },
     { label: 'Panier moyen', value: formatCurrency(panier), change: +5.1, icon: '🛒', color: '#f59e0b', sub: `Sur ${formatNumber(totalUnits)} commandes` },
   ]
 
@@ -78,8 +72,11 @@ export default function VentesProfit() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Ventes & Profit</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Analysez vos performances et votre rentabilite par periode</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Ventes & Profit</h1>
+            <DemoBadge />
+          </div>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Analysez vos performances et votre rentabilité par période</p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {['7j', '30j', '90j'].map(p => (
@@ -112,7 +109,7 @@ export default function VentesProfit() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 22 }}>
         <div style={{ ...box, padding: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>Evolution Ventes & Profit</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>Évolution Ventes & Profit</h3>
             <div style={{ display: 'flex', gap: 14 }}>
               <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ width: 10, height: 3, background: '#6366f1', borderRadius: 2, display: 'inline-block' }} /> Ventes
@@ -145,7 +142,7 @@ export default function VentesProfit() {
         </div>
 
         <div style={{ ...box, padding: 22 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', marginBottom: 18 }}>Ventes vs Profit par periode</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', marginBottom: 18 }}>Ventes vs Profit par période</h3>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={d.chart} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" />
@@ -161,13 +158,13 @@ export default function VentesProfit() {
 
       <div style={{ ...box, overflow: 'hidden' }}>
         <div style={{ padding: '16px 22px', borderBottom: '1px solid #f0f0eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>Detail par produit (30 derniers jours)</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>Détail par produit (30 derniers jours)</h3>
           <span style={{ fontSize: 12, color: '#9ca3af' }}>{products.length} produit{products.length !== 1 ? 's' : ''}</span>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['Produit', 'CA (30j)', 'Profit (30j)', 'Marge', 'Unites', 'ACOS', 'Tendance'].map(h => (
+              {['Produit', 'CA (30j)', 'Profit (30j)', 'Marge', 'Unités', 'ACOS', 'Tendance'].map(h => (
                 <th key={h} style={{ padding: '10px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
               ))}
             </tr>
@@ -178,7 +175,7 @@ export default function VentesProfit() {
                 <td colSpan={7} style={{ padding: '60px 20px', textAlign: 'center' }}>
                   <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>Aucun produit</div>
-                  <div style={{ fontSize: 13, color: '#9ca3af' }}>Ajoutez des produits dans l'onglet Produits pour voir les donnees ici</div>
+                  <div style={{ fontSize: 13, color: '#9ca3af' }}>Ajoutez des produits dans l'onglet Produits pour voir les données ici</div>
                 </td>
               </tr>
             ) : products.map(p => {
