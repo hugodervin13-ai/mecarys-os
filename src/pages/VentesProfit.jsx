@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
 import { formatCurrency, formatNumber } from '../lib/utils'
 import { box } from '../lib/theme'
+import { computeProfit, margeColor } from '../lib/profit'
 import { DemoBadge } from '../components/ui'
 import Loading from '../components/Loading'
 import {
@@ -53,9 +54,12 @@ export default function VentesProfit() {
   const products = productsData || []
 
   const d = DATA[period]
-  const totalCA = products.reduce((a, p) => a + (p.revenue_30d || 0), 0) || d.ca
-  const totalProfit = products.reduce((a, p) => a + (p.profit_30d || 0), 0) || d.profit
-  const totalUnits = products.reduce((a, p) => a + (p.units_sold_30d || 0), 0) || d.units
+  const profitData = products.map(p => computeProfit(p))
+  const hasRealData = profitData.some(m => m.units > 0)
+  const totalCA = hasRealData ? profitData.reduce((a, m) => a + m.revenue30d, 0) : d.ca
+  const totalProfit = hasRealData ? profitData.reduce((a, m) => a + m.profitNet30d, 0) : d.profit
+  const totalUnits = hasRealData ? profitData.reduce((a, m) => a + m.units, 0) : d.units
+  const totalPub = hasRealData ? profitData.reduce((a, m) => a + m.pubPerUnit * m.units, 0) : 0
   const margin = totalCA > 0 ? ((totalProfit / totalCA) * 100).toFixed(1) : '25.2'
   const panier = totalUnits > 0 ? totalCA / totalUnits : d.panier
 
@@ -164,7 +168,7 @@ export default function VentesProfit() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['Produit', 'CA (30j)', 'Profit (30j)', 'Marge', 'Unités', 'ACOS', 'Tendance'].map(h => (
+              {['Produit', 'CA (30j)', 'Profit net (30j)', 'Marge nette', 'Unités', 'ACOS / Break-even', 'ROI'].map(h => (
                 <th key={h} style={{ padding: '10px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
               ))}
             </tr>
@@ -179,9 +183,10 @@ export default function VentesProfit() {
                 </td>
               </tr>
             ) : products.map(p => {
-              const marge = p.revenue_30d > 0 ? ((p.profit_30d / p.revenue_30d) * 100) : 0
-              const margeColor = marge >= 25 ? '#10b981' : marge >= 15 ? '#f59e0b' : '#ef4444'
-              const acosColor = (p.acos || 0) <= 20 ? '#10b981' : (p.acos || 0) <= 35 ? '#f59e0b' : '#ef4444'
+              const m = computeProfit(p)
+              const mc = margeColor(m.margePct)
+              const acosVal = Number(p.acos) || 0
+              const acosColor = acosVal <= 20 ? '#10b981' : acosVal <= 35 ? '#f59e0b' : '#ef4444'
               return (
                 <tr key={p.id} style={{ borderTop: '1px solid #f0f0eb' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
@@ -191,22 +196,28 @@ export default function VentesProfit() {
                     <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{p.asin}</div>
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e' }}>{formatCurrency(p.revenue_30d || 0)}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e' }}>{formatCurrency(m.revenue30d)}</span>
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#10b981' }}>{formatCurrency(p.profit_30d || 0)}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: m.profitNet30d >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(m.profitNet30d)}</span>
+                    {m.price > 0 && <div style={{ fontSize: 10, color: '#9ca3af' }}>{formatCurrency(m.margeNette)}/unité</div>}
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: margeColor, padding: '3px 10px', background: `${margeColor}15`, borderRadius: 20 }}>{marge.toFixed(1)}%</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: mc, padding: '3px 10px', background: `${mc}15`, borderRadius: 20 }}>{m.margePct.toFixed(1)}%</span>
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{formatNumber(p.units_sold_30d || 0)}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{formatNumber(m.units)}</span>
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: acosColor }}>{(p.acos || 0).toFixed(1)}%</span>
+                    {acosVal > 0 ? (
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: acosColor }}>{acosVal.toFixed(1)}%</span>
+                        {m.breakEvenAcos > 0 && <div style={{ fontSize: 10, color: acosVal > m.breakEvenAcos ? '#ef4444' : '#9ca3af' }}>BE: {m.breakEvenAcos.toFixed(0)}%</div>}
+                      </div>
+                    ) : <span style={{ fontSize: 12, color: '#9ca3af' }}>-</span>}
                   </td>
                   <td style={{ padding: '13px 18px' }}>
-                    <span style={{ fontSize: 18 }}>{marge >= 20 ? '📈' : marge >= 10 ? '➡️' : '📉'}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: m.roi >= 50 ? '#10b981' : m.roi >= 20 ? '#f59e0b' : '#ef4444' }}>{m.roi.toFixed(0)}%</span>
                   </td>
                 </tr>
               )

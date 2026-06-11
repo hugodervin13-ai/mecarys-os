@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getProducts, getAlerts } from '../lib/supabase'
+import { computeAlerts, SEVERITY } from '../lib/alertsEngine'
 import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
 import { formatNumber } from '../lib/utils'
@@ -61,12 +62,7 @@ const tracked = [
   { asin: 'B0C1234567', price: '25,50', chg: -0.20, rating: 4.0, rev: 532 },
 ]
 
-const alertsList = [
-  { id: 1, msg: 'Stock faible sur 3 produits', icon: '⚠️', link: '/stock' },
-  { id: 2, msg: 'Rupture de stock imminent (7 jours)', icon: '🔴', link: '/stock' },
-  { id: 3, msg: 'Retour produit en hausse', icon: '📦', link: '/qualite-sav' },
-  { id: 4, msg: 'Prix concurrent en baisse sur 2 ASIN', icon: '💰', link: '/concurrents' },
-]
+const ALERT_LINKS = { stock: '/stock', marge: '/produits', acos: '/produits', avis: '/qualite-sav' }
 
 const pipe = [
   { label: 'Production', n: 3, color: '#6366f1', bg: '#6366f110', icon: '🏭' },
@@ -104,6 +100,24 @@ export default function Dashboard() {
 
   const stock = products.reduce((a, p) => a + (p.stock_fba || 0), 0) || 4782
   const kpi = KPI_BY_PERIOD[kpiPeriod]
+
+  const realAlerts = computeAlerts(products || [])
+  const severityCounts = realAlerts.reduce((acc, a) => { acc[a.severity] = (acc[a.severity] || 0) + 1; return acc }, {})
+  const dbAlerts = alertsData || []
+
+  const alertsList = realAlerts.length > 0
+    ? realAlerts.slice(0, 5).map((a, i) => ({
+        id: i,
+        icon: SEVERITY[a.severity]?.icon || '🔵',
+        msg: a.message,
+        link: ALERT_LINKS[a.type] || '/produits',
+      }))
+    : dbAlerts.slice(0, 5).map((a, i) => ({
+        id: a.id || i,
+        icon: a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟠' : '🔵',
+        msg: a.message || 'Alerte',
+        link: ALERT_LINKS[a.type] || '/produits',
+      }))
 
   const handleAnalyse = async () => {
     if (!asinInput.trim()) return
@@ -268,7 +282,12 @@ export default function Dashboard() {
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 14 }}>🚨</span> Alertes
             </div>
-            {alertsList.map(a => (
+            {alertsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                <span style={{ fontSize: 20 }}>✅</span>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Aucune alerte</div>
+              </div>
+            ) : alertsList.map(a => (
               <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
                   <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{a.icon}</span>
