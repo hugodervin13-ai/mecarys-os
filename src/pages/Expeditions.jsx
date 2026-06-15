@@ -4,7 +4,8 @@ import { box, inp, lbl, colors } from '../lib/theme'
 import { KpiCard, EmptyState, PageHeader } from '../components/ui'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
-import { getProducts, getSuppliers, updateProduct } from '../lib/supabase'
+import { getProducts, updateProduct } from '../lib/supabase'
+import { listSuppliers } from '../lib/suppliersRepo'
 import { mutate } from '../lib/useData'
 import {
   TRANSPORT_TYPES, STATUS, STATUS_FLOW, TIMELINE_STEPS, CARRIERS, trackingUrl,
@@ -106,7 +107,7 @@ export default function Expeditions() {
     })
     // Catalogue produits & fournisseurs pour les sélecteurs (best-effort).
     getProducts(uid).then(({ data }) => alive && setProducts(data || [])).catch(() => {})
-    getSuppliers(uid).then(({ data }) => alive && setSuppliers(data || [])).catch(() => {})
+    listSuppliers(uid).then(({ data }) => alive && setSuppliers(data || [])).catch(() => {})
     return () => { alive = false }
   }, [uid])
 
@@ -427,11 +428,29 @@ export default function Expeditions() {
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editingId ? "Modifier l'expédition" : 'Nouvelle expédition'}>
         <form onSubmit={handleSubmit}>
           <datalist id="dl-products">{products.map(p => <option key={p.id} value={p.name} />)}</datalist>
-          <datalist id="dl-suppliers">{suppliers.map(s => <option key={s.id} value={s.name} />)}</datalist>
           <Row>
             <Field label="Référence"><input style={inp} value={form.reference} placeholder="Auto si vide" onChange={e => setForm({ ...form, reference: e.target.value })} /></Field>
             <Field label="Fournisseur">
-              <input style={inp} list="dl-suppliers" value={form.supplier} placeholder="Choisir ou saisir" onChange={e => onPickSupplier(e.target.value)} />
+              {suppliers.length > 0 ? (
+                <select style={inp} value={form.supplier_id || ''} onChange={e => {
+                  const s = suppliers.find(s => s.id === e.target.value)
+                  setForm(f => ({ ...f, supplier_id: s?.id || null, supplier: s?.name || '' }))
+                }}>
+                  <option value="">— Sélectionner un fournisseur —</option>
+                  {suppliers.filter(s => s.status !== 'inactive').map(s => (
+                    <option key={s.id} value={s.id}>{s.name}{s.country ? ` · ${s.country}` : ''}</option>
+                  ))}
+                  {suppliers.some(s => s.status === 'inactive') && (
+                    <optgroup label="Inactifs">
+                      {suppliers.filter(s => s.status === 'inactive').map(s => (
+                        <option key={s.id} value={s.id}>{s.name}{s.country ? ` · ${s.country}` : ''}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              ) : (
+                <input style={inp} value={form.supplier} placeholder="Nom du fournisseur" onChange={e => setForm({ ...form, supplier: e.target.value, supplier_id: null })} />
+              )}
             </Field>
           </Row>
           <Row>
