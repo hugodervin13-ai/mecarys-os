@@ -1,63 +1,48 @@
-import { useEffect, useState } from 'react'
-import { getShipments, addShipment, deleteShipment, updateShipment } from '../lib/supabase'
-import { useStore, toast } from '../lib/store'
-import { mutate } from '../lib/useData'
-import { box, inp, lbl } from '../lib/theme'
-import { DemoBadge, KpiCard, EmptyState } from '../components/ui'
+import { useEffect, useMemo, useState } from 'react'
+import { useStore } from '../lib/store'
+import { box, inp, lbl, colors } from '../lib/theme'
+import { KpiCard, EmptyState, PageHeader } from '../components/ui'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
+import {
+  TRANSPORT_TYPES, STATUS, STATUS_FLOW, TIMELINE_STEPS, CARRIERS, trackingUrl,
+  emptyShipment, transportDuration, delayDays, unitCost, computeStats,
+  computeShipmentAlerts, computeAllAlerts, loadShipments, saveShipments,
+  newId, autoReference, demoShipments,
+} from '../lib/shipments'
+import { toast } from '../lib/store'
 
-const STATUS = {
-  production: { label: 'Production',   color: '#6366f1', icon: '🏭' },
-  transit:    { label: 'En transit',   color: '#3b82f6', icon: '🚢' },
-  customs:    { label: 'En douane',    color: '#f59e0b', icon: '🛃' },
-  warehouse:  { label: 'Entrepôt',     color: '#10b981', icon: '🏬' },
-  delivered:  { label: 'Livré',        color: '#10b981', icon: '✅' },
-  fba:        { label: 'Amazon FBA',   color: '#10b981', icon: '📦' },
+const SEVERITY_STYLE = {
+  critical: { bg: '#fef2f2', border: '#fecaca', color: '#b91c1c' },
+  warning:  { bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+  info:     { bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8' },
 }
 
-const STEPS = ['production', 'transit', 'customs', 'warehouse', 'fba']
-
-const CARRIERS = {
-  dhl:      { name: 'DHL',       url: 'https://www.dhl.com/fr-fr/home/suivi.html?tracking-id=', color: '#FFCC00' },
-  fedex:    { name: 'FedEx',     url: 'https://www.fedex.com/fedextrack/?trknbr=', color: '#4D148C' },
-  ups:      { name: 'UPS',       url: 'https://www.ups.com/track?tracknum=', color: '#351C15' },
-  tnt:      { name: 'TNT',       url: 'https://www.tnt.com/express/fr_fr/site/outils-expedition/suivi.html?searchType=con&cons=', color: '#FF6600' },
-  dpd:      { name: 'DPD',       url: 'https://trace.dpd.fr/fr/trace/', color: '#DC0032' },
-  cma:      { name: 'CMA CGM',   url: 'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=ContainerNumber&Reference=', color: '#002B5C' },
-  maersk:   { name: 'Maersk',    url: 'https://www.maersk.com/tracking/', color: '#003B5C' },
-  msc:      { name: 'MSC',       url: 'https://www.msc.com/track-a-shipment?agencyPath=fr&trackingNumber=', color: '#002244' },
-  other:    { name: 'Autre',     url: 'https://www.17track.net/fr/track?nums=', color: '#6b7280' },
-}
-
-const mockShipments = [
-  { id: 'm1', reference: 'EXP-2024-001', origin: 'Shenzhen, Chine', destination: 'Amazon FBA FR', status: 'transit', carrier: 'dhl', tracking_number: '1234567890', eta: '2024-05-20', items: 500 },
-  { id: 'm2', reference: 'EXP-2024-002', origin: 'Guangzhou, Chine', destination: 'Amazon FBA DE', status: 'customs', carrier: 'fedex', tracking_number: '9876543210', eta: '2024-05-18', items: 300 },
-  { id: 'm3', reference: 'EXP-2024-003', origin: 'Istanbul, Turquie', destination: 'Amazon FBA FR', status: 'fba', carrier: 'cma', tracking_number: 'CMAU1234567', eta: '2024-05-10', items: 200 },
-]
-
-const emptyForm = { reference: '', origin: '', destination: '', carrier: 'dhl', items: '', status: 'transit', eta: '', tracking_number: '' }
-
+// ---------- Timeline automatique ----------
 function ProgressSteps({ status }) {
-  const currentIdx = STEPS.indexOf(status)
+  // Si le statut courant n'est pas une étape de timeline (draft/closed),
+  // on rattache l'index logique : draft → avant tout, closed → tout validé.
+  const flowIdx = STATUS_FLOW.indexOf(status)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginTop: 10 }}>
-      {STEPS.map((step, i) => {
+    <div style={{ display: 'flex', alignItems: 'flex-start', marginTop: 14, overflowX: 'auto' }}>
+      {TIMELINE_STEPS.map((step, i) => {
         const s = STATUS[step]
-        const done = i <= currentIdx
-        const isCurrent = i === currentIdx
+        const stepFlowIdx = STATUS_FLOW.indexOf(step)
+        const done = flowIdx >= stepFlowIdx
+        const isCurrent = status === step
+        const fill = done ? (isCurrent ? s.color : colors.success) : '#f0f0eb'
         return (
-          <div key={step} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 0 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: done ? (isCurrent ? s.color : '#10b981') : '#f0f0eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, border: `2px solid ${done ? (isCurrent ? s.color : '#10b981') : '#e8e8e3'}` }}>
+          <div key={step} style={{ display: 'flex', alignItems: 'center', flex: i < TIMELINE_STEPS.length - 1 ? 1 : 0, minWidth: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 54 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: fill, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, border: `2px solid ${done ? fill : '#e8e8e3'}`, boxShadow: isCurrent ? `0 0 0 4px ${s.color}22` : 'none' }}>
                 {done ? (isCurrent ? s.icon : '✓') : ''}
               </div>
-              <span style={{ fontSize: 9, color: done ? (isCurrent ? s.color : '#10b981') : '#9ca3af', marginTop: 3, whiteSpace: 'nowrap', fontWeight: isCurrent ? 700 : 400 }}>
+              <span style={{ fontSize: 9, color: done ? (isCurrent ? s.color : colors.success) : '#9ca3af', marginTop: 4, whiteSpace: 'nowrap', fontWeight: isCurrent ? 700 : 400 }}>
                 {s.label}
               </span>
             </div>
-            {i < STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: i < currentIdx ? '#10b981' : '#f0f0eb', margin: '0 4px', marginBottom: 16 }} />
+            {i < TIMELINE_STEPS.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: flowIdx > stepFlowIdx ? colors.success : '#f0f0eb', margin: '0 2px', marginBottom: 16, minWidth: 12 }} />
             )}
           </div>
         )
@@ -69,269 +54,337 @@ function ProgressSteps({ status }) {
 function TrackingBadge({ carrier, tracking }) {
   if (!tracking) return <span style={{ fontSize: 12, color: '#9ca3af' }}>Aucun suivi</span>
   const c = CARRIERS[carrier] || CARRIERS.other
-  const trackUrl = c.url + encodeURIComponent(tracking)
   return (
-    <a href={trackUrl} target="_blank" rel="noopener noreferrer"
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 8, textDecoration: 'none', cursor: 'pointer' }}>
+    <a href={trackingUrl(carrier, tracking)} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 8, textDecoration: 'none' }}>
       <span style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', fontFamily: 'monospace' }}>{tracking}</span>
       <span style={{ fontSize: 10, color: '#6b7280' }}>({c.name})</span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
-        <polyline points="15 3 21 3 21 9"/>
-        <line x1="10" y1="14" x2="21" y2="3"/>
+        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
       </svg>
     </a>
   )
 }
 
+function Metric({ label, value, color = colors.text }) {
+  return (
+    <div style={{ flex: '1 1 110px', minWidth: 110, padding: '8px 12px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb' }}>
+      <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color, marginTop: 2 }}>{value}</div>
+    </div>
+  )
+}
+
 export default function Expeditions() {
   const { user } = useStore()
+  const uid = user?.id
   const [shipments, setShipments] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState(emptyForm)
-  const [useMock, setUseMock] = useState(false)
-  const [editingTracking, setEditingTracking] = useState(null)
-  const [trackingInput, setTrackingInput] = useState('')
+  const [form, setForm] = useState(emptyShipment())
+  const [editingId, setEditingId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState({ status: '', carrier: '', transport_type: '', country: '' })
+  const [showArchived, setShowArchived] = useState(false)
 
-  useEffect(() => { if (user) loadData() }, [user])
+  // Chargement initial depuis localStorage (persistant).
+  useEffect(() => {
+    setShipments(loadShipments(uid))
+    setLoaded(true)
+  }, [uid])
 
-  const loadData = async () => {
-    const { data, error } = await getShipments(user.id)
-    if (error || !data || data.length === 0) {
-      if (error) toast(`Erreur de chargement : ${error.message || 'réessayez plus tard'}`)
-      setShipments(mockShipments)
-      setUseMock(true)
-    } else {
-      setShipments(data)
-      setUseMock(false)
-    }
-    setLoading(false)
-  }
+  // Persistance automatique à chaque changement (après le chargement initial).
+  useEffect(() => {
+    if (loaded) saveShipments(uid, shipments)
+  }, [shipments, loaded, uid])
 
-  const handleSubmit = async (e) => {
+  // ---------- CRUD ----------
+  const openCreate = () => { setForm(emptyShipment()); setEditingId(null); setShowForm(true) }
+  const openEdit = (s) => { setForm({ ...emptyShipment(), ...s }); setEditingId(s.id); setShowForm(true) }
+
+  const handleSubmit = (e) => {
     e.preventDefault()
-    setSaving(true)
-    const shipmentData = {
-      reference: form.reference || `EXP-${Date.now().toString(36).toUpperCase()}`,
-      origin: form.origin,
-      destination: form.destination,
-      carrier: form.carrier,
-      items: Number(form.items),
-      status: form.status,
-      eta: form.eta || null,
+    const data = {
+      ...form,
+      reference: form.reference?.trim() || autoReference(),
+      quantity: form.quantity === '' ? '' : Number(form.quantity),
+      transport_cost: form.transport_cost === '' ? '' : Number(form.transport_cost),
     }
-    if (useMock) {
-      setShipments(prev => [...prev, { ...shipmentData, id: `m${Date.now()}`, tracking_number: form.tracking_number || null }])
+    if (editingId) {
+      setShipments(prev => prev.map(s => s.id === editingId ? { ...s, ...data } : s))
+      toast('Expédition mise à jour', 'success')
     } else {
-      const ok = await mutate(() => addShipment(user.id, shipmentData), 'shipments')
-      if (ok) await loadData()
+      setShipments(prev => [{ id: newId(), archived: false, ...data }, ...prev])
+      toast('Expédition créée', 'success')
     }
-    setForm(emptyForm)
     setShowForm(false)
-    setSaving(false)
+    setEditingId(null)
+    setForm(emptyShipment())
   }
 
-  const handleStatusChange = async (id, newStatus) => {
-    if (useMock || String(id).startsWith('m')) {
-      setShipments(prev => prev.map(s => s.id === id ? { ...s, status: newStatus } : s))
-    } else {
-      const ok = await mutate(() => updateShipment(id, { status: newStatus }), 'shipments')
-      if (ok) loadData()
-    }
+  const handleStatusChange = (id, status) =>
+    setShipments(prev => prev.map(s => s.id === id ? { ...s, status } : s))
+
+  const handleDuplicate = (s) => {
+    setShipments(prev => [{ ...s, id: newId(), reference: `${s.reference}-COPIE`, status: 'draft', actual_arrival: '' }, ...prev])
+    toast('Expédition dupliquée', 'success')
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Supprimer cette expédition ?')) return
-    if (useMock || String(id).startsWith('m')) {
-      setShipments(prev => prev.filter(s => s.id !== id))
-    } else {
-      const ok = await mutate(() => deleteShipment(id), 'shipments')
-      if (ok) loadData()
-    }
+  const handleArchive = (id) =>
+    setShipments(prev => prev.map(s => s.id === id ? { ...s, archived: !s.archived } : s))
+
+  const handleDelete = (id) => {
+    if (!confirm('Supprimer définitivement cette expédition ?')) return
+    setShipments(prev => prev.filter(s => s.id !== id))
+    toast('Expédition supprimée', 'success')
   }
 
-  const saveTracking = async (id) => {
-    if (useMock || String(id).startsWith('m')) {
-      setShipments(prev => prev.map(s => s.id === id ? { ...s, tracking_number: trackingInput } : s))
-    } else {
-      const ok = await mutate(() => updateShipment(id, { tracking_number: trackingInput }), 'shipments')
-      if (ok) loadData()
-    }
-    setEditingTracking(null)
-  }
+  const loadDemo = () => { setShipments(demoShipments()); toast('Données de démonstration chargées', 'info') }
 
-  const inTransit = shipments.filter(s => s.status === 'transit' || s.status === 'customs' || s.status === 'production').length
-  const inCustoms = shipments.filter(s => s.status === 'customs').length
-  const delivered = shipments.filter(s => s.status === 'delivered' || s.status === 'fba').length
-  const totalItems = shipments.filter(s => s.status !== 'delivered' && s.status !== 'fba').reduce((a, s) => a + (s.items || 0), 0)
-  const withTracking = shipments.filter(s => s.tracking_number).length
+  // ---------- Stats, alertes, filtres ----------
+  const stats = useMemo(() => computeStats(shipments), [shipments])
+  const alerts = useMemo(() => computeAllAlerts(shipments.filter(s => !s.archived)), [shipments])
 
-  if (loading) return <Loading />
+  const countries = useMemo(() => {
+    const set = new Set()
+    shipments.forEach(s => { if (s.country_from) set.add(s.country_from); if (s.country_to) set.add(s.country_to) })
+    return [...set].sort()
+  }, [shipments])
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return shipments.filter(s => {
+      if (!showArchived && s.archived) return false
+      if (showArchived && !s.archived) return false
+      if (q && ![s.reference, s.supplier, s.product].some(v => (v || '').toLowerCase().includes(q))) return false
+      if (filters.status && s.status !== filters.status) return false
+      if (filters.carrier && s.carrier !== filters.carrier) return false
+      if (filters.transport_type && s.transport_type !== filters.transport_type) return false
+      if (filters.country && s.country_from !== filters.country && s.country_to !== filters.country) return false
+      return true
+    })
+  }, [shipments, search, filters, showArchived])
+
+  const archivedCount = shipments.filter(s => s.archived).length
+
+  if (!loaded) return <Loading />
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Expéditions</h1>
-            {useMock && <DemoBadge />}
-          </div>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Suivez vos envois fournisseurs jusqu'aux entrepôts Amazon FBA</p>
-        </div>
-        <button onClick={() => setShowForm(true)}
-          style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+      <PageHeader title="Expéditions" subtitle="Pilotez vos importations fournisseurs jusqu'aux entrepôts Amazon FBA">
+        <button onClick={openCreate} style={{ padding: '10px 20px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           + Nouvelle expédition
         </button>
-      </div>
+      </PageHeader>
 
-      {inCustoms > 0 && (
-        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 20 }}>🛃</span>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>{inCustoms} expédition{inCustoms > 1 ? 's' : ''} bloquée{inCustoms > 1 ? 's' : ''} en douane</div>
-            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Vérifiez la documentation douanière et contactez votre transitaire</div>
-          </div>
+      {/* Alertes dynamiques */}
+      {alerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+          {alerts.slice(0, 5).map((a, i) => {
+            const st = SEVERITY_STYLE[a.severity]
+            return (
+              <div key={i} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 10, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>{a.icon}</span>
+                <span style={{ fontSize: 13, color: st.color, fontWeight: 600 }}>{a.message}</span>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
-        <KpiCard label="En cours" value={inTransit} icon="🚢" color="#3b82f6" sub="En route vers FBA" />
-        <KpiCard label="En douane" value={inCustoms} icon="🛃" color={inCustoms > 0 ? '#f59e0b' : '#10b981'} sub={inCustoms > 0 ? 'Attention requise' : 'Aucun blocage'} />
-        <KpiCard label="Livrées" value={delivered} icon="✅" color="#10b981" sub="Dans les entrepôts" />
-        <KpiCard label="Unités en transit" value={totalItems.toLocaleString()} icon="📦" color="#6366f1" sub={`${withTracking} avec suivi`} />
+      {/* KPIs dynamiques (responsive) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 22 }}>
+        <KpiCard label="En cours" value={stats.active} icon="🚢" color={colors.info} sub="En route vers FBA" />
+        <KpiCard label="En douane" value={stats.customs} icon="🛃" color={stats.customs > 0 ? colors.warning : colors.success} sub={stats.customs > 0 ? 'Attention requise' : 'Aucun blocage'} />
+        <KpiCard label="Livrées" value={stats.delivered} icon="✅" color={colors.success} sub="Reçues / clôturées" />
+        <KpiCard label="Unités en transit" value={stats.unitsInTransit.toLocaleString('fr-FR')} icon="📦" color={colors.primary} sub={`${stats.withTracking} avec suivi`} />
       </div>
 
+      {/* Recherche + filtres (responsive) */}
+      <div style={{ ...box, padding: 14, marginBottom: 18, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <input style={{ ...inp, flex: '2 1 220px' }} placeholder="🔍 Référence, fournisseur, produit…" value={search} onChange={e => setSearch(e.target.value)} />
+        <select style={{ ...inp, flex: '1 1 140px' }} value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}>
+          <option value="">Tous les statuts</option>
+          {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
+        </select>
+        <select style={{ ...inp, flex: '1 1 130px' }} value={filters.transport_type} onChange={e => setFilters({ ...filters, transport_type: e.target.value })}>
+          <option value="">Tous transports</option>
+          {Object.entries(TRANSPORT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+        </select>
+        <select style={{ ...inp, flex: '1 1 130px' }} value={filters.carrier} onChange={e => setFilters({ ...filters, carrier: e.target.value })}>
+          <option value="">Tous transporteurs</option>
+          {Object.entries(CARRIERS).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}
+        </select>
+        <select style={{ ...inp, flex: '1 1 120px' }} value={filters.country} onChange={e => setFilters({ ...filters, country: e.target.value })}>
+          <option value="">Tous pays</option>
+          {countries.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {(search || filters.status || filters.carrier || filters.transport_type || filters.country) && (
+          <button onClick={() => { setSearch(''); setFilters({ status: '', carrier: '', transport_type: '', country: '' }) }}
+            style={{ padding: '9px 14px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, fontSize: 12, color: '#6b7280', cursor: 'pointer', fontWeight: 600 }}>
+            Réinitialiser
+          </button>
+        )}
+      </div>
+
+      {archivedCount > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <button onClick={() => setShowArchived(v => !v)}
+            style={{ padding: '7px 14px', background: showArchived ? colors.primary : '#fff', color: showArchived ? '#fff' : colors.textMuted, border: `1px solid ${showArchived ? colors.primary : colors.border}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            🗄️ {showArchived ? 'Voir les expéditions actives' : `Voir les archivées (${archivedCount})`}
+          </button>
+        </div>
+      )}
+
+      {/* Liste */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {shipments.map(s => {
-          const st = STATUS[s.status] || STATUS.transit
+        {visible.map(s => {
+          const st = STATUS[s.status] || STATUS.draft
+          const tt = TRANSPORT_TYPES[s.transport_type] || TRANSPORT_TYPES.bateau
           const carrierInfo = CARRIERS[s.carrier] || CARRIERS.other
+          const dur = transportDuration(s)
+          const delay = delayDays(s)
+          const uc = unitCost(s)
+          const cardAlerts = computeShipmentAlerts(s)
           return (
-            <div key={s.id} style={{ ...box, padding: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ width: 48, height: 48, borderRadius: 12, background: `${st.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
-                    {st.icon}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', fontFamily: 'monospace' }}>{s.reference}</div>
-                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                      {s.origin} → {s.destination} · {carrierInfo.name} · <strong>{s.items} unités</strong>
+            <div key={s.id} style={{ ...box, padding: 20, opacity: s.archived ? 0.7 : 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: `${tt.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>{tt.icon}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: 'monospace' }}>{s.reference}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: `${tt.color}15`, color: tt.color }}>{tt.label} · ~{tt.days}j</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
+                      {s.supplier && <strong>{s.supplier}</strong>}{s.supplier && ' · '}{s.product || 'Produit non renseigné'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                      {(s.country_from || '?')} → {(s.country_to || '?')} · {carrierInfo.name} · <strong>{Number(s.quantity) || 0} unités</strong>
                     </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {s.eta && (
-                    <span style={{ fontSize: 12, color: '#6b7280', background: '#fafaf8', padding: '4px 10px', borderRadius: 6, border: '1px solid #e8e8e3' }}>
-                      ETA: {s.eta}
-                    </span>
-                  )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <select value={s.status} onChange={e => handleStatusChange(s.id, e.target.value)}
                     style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${st.color}40`, background: `${st.color}15`, color: st.color, fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
-                    {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+                    {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
                   </select>
-                  <button onClick={() => handleDelete(s.id)}
-                    style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>✕</button>
+                  <button onClick={() => openEdit(s)} title="Modifier" style={iconBtn}>✏️</button>
+                  <button onClick={() => handleDuplicate(s)} title="Dupliquer" style={iconBtn}>⧉</button>
+                  <button onClick={() => handleArchive(s.id)} title={s.archived ? 'Désarchiver' : 'Archiver'} style={iconBtn}>🗄️</button>
+                  <button onClick={() => handleDelete(s.id)} title="Supprimer" style={{ ...iconBtn, color: colors.danger }}>🗑️</button>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, padding: '10px 14px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb' }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', whiteSpace: 'nowrap' }}>N° suivi :</span>
-                {editingTracking === s.id ? (
-                  <div style={{ display: 'flex', gap: 6, flex: 1 }}>
-                    <input style={{ ...inp, flex: 1, fontFamily: 'monospace' }} type="text" value={trackingInput}
-                      onChange={e => setTrackingInput(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && saveTracking(s.id)}
-                      placeholder="Ex: 1234567890, CMAU1234567..." autoFocus />
-                    <button onClick={() => saveTracking(s.id)}
-                      style={{ padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                      Sauver
-                    </button>
-                    <button onClick={() => setEditingTracking(null)}
-                      style={{ padding: '6px 10px', background: '#f0f0eb', color: '#6b7280', border: 'none', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                    <TrackingBadge carrier={s.carrier} tracking={s.tracking_number} />
-                    <button onClick={() => { setEditingTracking(s.id); setTrackingInput(s.tracking_number || '') }}
-                      style={{ padding: '4px 10px', background: 'none', border: '1px solid #e8e8e3', borderRadius: 6, fontSize: 11, color: '#6b7280', cursor: 'pointer', fontWeight: 600 }}>
-                      {s.tracking_number ? '✏️ Modifier' : '+ Ajouter'}
-                    </button>
-                  </div>
-                )}
+              {/* Alertes spécifiques à la carte */}
+              {cardAlerts.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+                  {cardAlerts.map((a, i) => {
+                    const ss = SEVERITY_STYLE[a.severity]
+                    return <span key={i} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: ss.bg, border: `1px solid ${ss.border}`, color: ss.color }}>{a.icon} {a.message.split(' : ')[1] || a.message}</span>
+                  })}
+                </div>
+              )}
+
+              {/* Calculs automatiques */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                <Metric label="Coût transport" value={s.transport_cost ? `${Number(s.transport_cost).toLocaleString('fr-FR')} €` : '—'} />
+                <Metric label="Coût / unité" value={uc != null ? `${uc.toFixed(2)} €` : '—'} />
+                <Metric label="Durée transit" value={dur != null ? `${dur} j` : '—'} />
+                <Metric label="Retard" value={delay == null ? '—' : delay > 0 ? `+${delay} j` : `${delay} j`} color={delay > 7 ? colors.danger : delay > 0 ? colors.warning : delay != null ? colors.success : colors.text} />
+                <Metric label="ETA" value={s.eta || '—'} />
+                <Metric label="Arrivée réelle" value={s.actual_arrival || '—'} />
               </div>
+
+              {/* Suivi */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>N° suivi :</span>
+                <TrackingBadge carrier={s.carrier} tracking={s.tracking_number} />
+              </div>
+
+              {s.notes && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 10, fontStyle: 'italic' }}>📝 {s.notes}</div>}
 
               <ProgressSteps status={s.status} />
             </div>
           )
         })}
-        {shipments.length === 0 && (
+
+        {visible.length === 0 && (
           <div style={box}>
-            <EmptyState icon="🚢" title="Aucune expédition en cours" subtitle="Créez une expédition pour suivre vos envois fournisseurs" />
+            <EmptyState
+              icon="🚢"
+              title={shipments.length === 0 ? 'Aucune expédition' : 'Aucun résultat'}
+              subtitle={shipments.length === 0 ? 'Créez votre première expédition pour suivre vos importations FBA.' : 'Aucune expédition ne correspond à votre recherche / filtres.'}
+              action={shipments.length === 0 ? (
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button onClick={openCreate} style={{ padding: '10px 20px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>+ Nouvelle expédition</button>
+                  <button onClick={loadDemo} style={{ padding: '10px 20px', background: '#fff', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Charger un exemple</button>
+                </div>
+              ) : null}
+            />
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: 14, padding: '14px 18px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>💡 Suivi en temps réel</div>
-        <div style={{ fontSize: 12, color: '#1e3a5f' }}>
-          Renseignez votre numéro de suivi et cliquez dessus pour être redirigé vers le site du transporteur (DHL, FedEx, UPS, CMA CGM, Maersk, MSC, etc.) et voir le statut en temps réel de votre expédition.
-        </div>
-      </div>
-
-      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle expédition">
+      {/* Formulaire création / édition */}
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editingId ? "Modifier l'expédition" : 'Nouvelle expédition'}>
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={lbl}>Référence</label>
-              <input style={inp} type="text" placeholder="Auto-généré si vide" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
-            </div>
-            <div>
-              <label style={lbl}>Transporteur *</label>
+          <Row>
+            <Field label="Référence"><input style={inp} value={form.reference} placeholder="Auto si vide" onChange={e => setForm({ ...form, reference: e.target.value })} /></Field>
+            <Field label="Fournisseur"><input style={inp} value={form.supplier} placeholder="Shenzhen Tech Co" onChange={e => setForm({ ...form, supplier: e.target.value })} /></Field>
+          </Row>
+          <Row>
+            <Field label="Produit"><input style={inp} value={form.product} placeholder="Câble USB-C 2m" onChange={e => setForm({ ...form, product: e.target.value })} /></Field>
+            <Field label="Quantité *"><input style={inp} type="number" min="1" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} required /></Field>
+          </Row>
+          <Row>
+            <Field label="Pays de départ"><input style={inp} value={form.country_from} placeholder="Chine" onChange={e => setForm({ ...form, country_from: e.target.value })} /></Field>
+            <Field label="Pays d'arrivée"><input style={inp} value={form.country_to} placeholder="France" onChange={e => setForm({ ...form, country_to: e.target.value })} /></Field>
+          </Row>
+          <Row>
+            <Field label="Type de transport">
+              <select style={inp} value={form.transport_type} onChange={e => setForm({ ...form, transport_type: e.target.value })}>
+                {Object.entries(TRANSPORT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label} (~{v.days}j)</option>)}
+              </select>
+            </Field>
+            <Field label="Transporteur">
               <select style={inp} value={form.carrier} onChange={e => setForm({ ...form, carrier: e.target.value })}>
                 {Object.entries(CARRIERS).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}
               </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Numéro de suivi</label>
-            <input style={{ ...inp, fontFamily: 'monospace' }} type="text" placeholder="Ex: 1234567890, CMAU1234567..." value={form.tracking_number} onChange={e => setForm({ ...form, tracking_number: e.target.value })} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={lbl}>Origine *</label>
-              <input style={inp} type="text" placeholder="Shenzhen, Chine" value={form.origin} onChange={e => setForm({ ...form, origin: e.target.value })} required />
-            </div>
-            <div>
-              <label style={lbl}>Destination *</label>
-              <input style={inp} type="text" placeholder="Amazon FBA FR" value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} required />
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
-            <div>
-              <label style={lbl}>Unités *</label>
-              <input style={inp} type="number" min="1" value={form.items} onChange={e => setForm({ ...form, items: e.target.value })} required />
-            </div>
-            <div>
-              <label style={lbl}>Statut</label>
-              <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-                {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={lbl}>ETA</label>
-              <input style={inp} type="date" value={form.eta} onChange={e => setForm({ ...form, eta: e.target.value })} />
-            </div>
-          </div>
-          <button type="submit" disabled={saving}
-            style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Création...' : "Créer l'expédition"}
+            </Field>
+          </Row>
+          <Row>
+            <Field label="Numéro de suivi"><input style={{ ...inp, fontFamily: 'monospace' }} value={form.tracking_number} placeholder="CMAU1234567" onChange={e => setForm({ ...form, tracking_number: e.target.value })} /></Field>
+            <Field label="Coût transport (€)"><input style={inp} type="number" min="0" step="0.01" value={form.transport_cost} onChange={e => setForm({ ...form, transport_cost: e.target.value })} /></Field>
+          </Row>
+          <Field label="Statut">
+            <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
+            </select>
+          </Field>
+          <Row>
+            <Field label="Date commande"><input style={inp} type="date" value={form.order_date} onChange={e => setForm({ ...form, order_date: e.target.value })} /></Field>
+            <Field label="Date départ"><input style={inp} type="date" value={form.departure_date} onChange={e => setForm({ ...form, departure_date: e.target.value })} /></Field>
+          </Row>
+          <Row>
+            <Field label="Arrivée estimée"><input style={inp} type="date" value={form.eta} onChange={e => setForm({ ...form, eta: e.target.value })} /></Field>
+            <Field label="Arrivée réelle"><input style={inp} type="date" value={form.actual_arrival} onChange={e => setForm({ ...form, actual_arrival: e.target.value })} /></Field>
+          </Row>
+          <Field label="Notes"><textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
+          <button type="submit" style={{ width: '100%', padding: 12, marginTop: 8, background: colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+            {editingId ? 'Enregistrer les modifications' : "Créer l'expédition"}
           </button>
         </form>
       </Modal>
     </div>
   )
+}
+
+const iconBtn = { width: 30, height: 30, borderRadius: 8, border: '1px solid #e8e8e3', background: '#fff', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }
+
+function Row({ children }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 12 }}>{children}</div>
+}
+function Field({ label, children }) {
+  return <div><label style={lbl}>{label}</label>{children}</div>
 }
