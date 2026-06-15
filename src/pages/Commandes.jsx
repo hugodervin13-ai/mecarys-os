@@ -1,46 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getOrders, addOrder, getProducts, deleteOrder, updateOrder } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { useData, mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
 import { formatCurrency, formatDate } from '../lib/utils'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
-
 const STATUS = {
   pending:       { label: 'En attente',         color: '#f59e0b', bg: '#fef3c715', icon: '⏳' },
   production:    { label: 'Production',         color: '#6366f1', bg: '#6366f115', icon: '🏭' },
-  shipped:       { label: 'Expediee',           color: '#3b82f6', bg: '#3b82f615', icon: '📤' },
+  shipped:       { label: 'Expédiée',           color: '#3b82f6', bg: '#3b82f615', icon: '📤' },
   transit_boat:  { label: 'Transit bateau',     color: '#0ea5e9', bg: '#0ea5e915', icon: '🚢' },
   transit_truck: { label: 'Transit camion',     color: '#3b82f6', bg: '#3b82f615', icon: '🚛' },
   transit:       { label: 'En transit (autre)',  color: '#3b82f6', bg: '#3b82f615', icon: '✈️' },
   customs:       { label: 'En douane',          color: '#f97316', bg: '#f9731615', icon: '🛃' },
-  delivered:     { label: 'Livree',             color: '#10b981', bg: '#10b98115', icon: '✅' },
-  cancelled:     { label: 'Annulee',            color: '#9ca3af', bg: '#9ca3af15', icon: '❌' },
+  delivered:     { label: 'Livrée',             color: '#10b981', bg: '#10b98115', icon: '✅' },
+  cancelled:     { label: 'Annulée',            color: '#9ca3af', bg: '#9ca3af15', icon: '❌' },
 }
 
 const emptyForm = { order_number: '', supplier: '', product_id: '', quantity: '', cost_total: '', expected_delivery: '', status: 'pending' }
 
 export default function Commandes() {
   const { user } = useStore()
-  const [orders, setOrders] = useState([])
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { data: ordersData, loading, reload } = useData('orders', () => getOrders(user.id), [user])
+  const { data: productsData } = useData('products', () => getProducts(user.id), [user])
+  const orders = ordersData || []
+  const products = productsData || []
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState('all')
-
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const [ordersRes, productsRes] = await Promise.all([getOrders(user.id), getProducts(user.id)])
-    setOrders(ordersRes.data || [])
-    setProducts(productsRes.data || [])
-    setLoading(false)
-  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -54,22 +44,24 @@ export default function Commandes() {
     }
     if (form.product_id) orderData.product_id = form.product_id
     if (form.expected_delivery) orderData.expected_delivery = form.expected_delivery
-    await addOrder(user.id, orderData)
-    setForm(emptyForm)
-    setShowForm(false)
+    const ok = await mutate(() => addOrder(user.id, orderData), 'orders', 'Commande créée')
     setSaving(false)
-    loadData()
+    if (ok) {
+      setForm(emptyForm)
+      setShowForm(false)
+      reload()
+    }
   }
 
   const handleStatusChange = async (id, newStatus) => {
-    await updateOrder(id, { status: newStatus })
-    loadData()
+    const ok = await mutate(() => updateOrder(id, { status: newStatus }), 'orders', 'Statut mis à jour')
+    if (ok) reload()
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Supprimer cette commande ?')) return
-    await deleteOrder(id)
-    loadData()
+    const ok = await mutate(() => deleteOrder(id), 'orders', 'Commande supprimée')
+    if (ok) reload()
   }
 
   const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.status === filterStatus)
@@ -84,7 +76,7 @@ export default function Commandes() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Commandes Fournisseurs</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Suivez vos commandes de reapprovisionnement de A a Z</p>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Suivez vos commandes de réapprovisionnement de A à Z</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -94,10 +86,10 @@ export default function Commandes() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
         {[
-          { label: 'Total commandes', value: orders.length, icon: '📋', color: '#6366f1', sub: 'Toutes periodes' },
-          { label: 'En attente', value: pending, icon: '⏳', color: '#f59e0b', sub: 'A confirmer' },
+          { label: 'Total commandes', value: orders.length, icon: '📋', color: '#6366f1', sub: 'Toutes périodes' },
+          { label: 'En attente', value: pending, icon: '⏳', color: '#f59e0b', sub: 'À confirmer' },
           { label: 'En transit', value: transit, icon: '🚢', color: '#3b82f6', sub: 'En route' },
-          { label: 'Montant engage', value: formatCurrency(totalAmount), icon: '💳', color: '#10b981', sub: 'Total commandes' },
+          { label: 'Montant engagé', value: formatCurrency(totalAmount), icon: '💳', color: '#10b981', sub: 'Total commandes' },
         ].map(k => (
           <div key={k.label} style={{ ...box, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -125,7 +117,7 @@ export default function Commandes() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['N° commande', 'Fournisseur', 'Produit', 'Quantite', 'Montant', 'Statut', 'Livraison prevue', 'Actions'].map(h => (
+              {['N° commande', 'Fournisseur', 'Produit', 'Quantité', 'Montant', 'Statut', 'Livraison prévue', 'Actions'].map(h => (
                 <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -166,7 +158,7 @@ export default function Commandes() {
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>📋</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Aucune commande</div>
-            <div style={{ fontSize: 13, color: '#9ca3af' }}>Creez une commande pour suivre vos reapprovisionnements</div>
+            <div style={{ fontSize: 13, color: '#9ca3af' }}>Créez une commande pour suivre vos réapprovisionnements</div>
           </div>
         )}
       </div>
@@ -176,7 +168,7 @@ export default function Commandes() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={lbl}>N° commande</label>
-              <input style={inp} type="text" placeholder="Auto-genere si vide" value={form.order_number} onChange={e => setForm({ ...form, order_number: e.target.value })} />
+              <input style={inp} type="text" placeholder="Auto-généré si vide" value={form.order_number} onChange={e => setForm({ ...form, order_number: e.target.value })} />
             </div>
             <div>
               <label style={lbl}>Fournisseur *</label>
@@ -185,16 +177,16 @@ export default function Commandes() {
           </div>
           {products.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <label style={lbl}>Produit associe</label>
+              <label style={lbl}>Produit associé</label>
               <select style={inp} value={form.product_id} onChange={e => setForm({ ...form, product_id: e.target.value })}>
-                <option value="">-- Selectionner un produit --</option>
+                <option value="">-- Sélectionner un produit --</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.asin})</option>)}
               </select>
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={lbl}>Quantite *</label>
+              <label style={lbl}>Quantité *</label>
               <input style={inp} type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} required min="1" />
             </div>
             <div>
@@ -210,13 +202,13 @@ export default function Commandes() {
               </select>
             </div>
             <div>
-              <label style={lbl}>Livraison prevue</label>
+              <label style={lbl}>Livraison prévue</label>
               <input style={inp} type="date" value={form.expected_delivery} onChange={e => setForm({ ...form, expected_delivery: e.target.value })} />
             </div>
           </div>
           <button type="submit" disabled={saving}
             style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Creation...' : 'Creer la commande'}
+            {saving ? 'Création...' : 'Créer la commande'}
           </button>
         </form>
       </Modal>

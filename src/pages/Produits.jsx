@@ -1,21 +1,25 @@
 import { useState, useEffect } from 'react'
 import { addProduct, getProducts, deleteProduct, updateProduct } from '../lib/supabase'
 import { useStore } from '../lib/store'
+import { useData, mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
 import { formatCurrency, formatNumber } from '../lib/utils'
+import { computeProfit, margeColor } from '../lib/profit'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { display: 'block', fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.5 }
+const EMPTY_FORM = { asin: '', name: '', price_current: '', cost: '', fba_fee: '', shipping_cost: '', stock_fba: '', stock_alerte: '20', rating: '', reviews_count: '', units_sold_30d: '', revenue_30d: '', profit_30d: '', acos: '', status: 'active' }
 
-const EMPTY_FORM = { asin: '', name: '', price_current: '', cost: '', stock_fba: '', stock_alerte: '20', rating: '', reviews_count: '', units_sold_30d: '', revenue_30d: '', profit_30d: '', acos: '', status: 'active' }
-
-function MarginBadge({ price, cost }) {
-  if (!price || !cost || price <= 0) return <span style={{ fontSize: 12, color: '#9ca3af' }}>-</span>
-  const margin = ((price - cost) / price) * 100
-  const color = margin >= 30 ? '#10b981' : margin >= 15 ? '#f59e0b' : '#ef4444'
-  return <span style={{ fontSize: 12, fontWeight: 700, color }}>{margin.toFixed(0)}%</span>
+function NetMarginBadge({ product }) {
+  const m = computeProfit(product)
+  if (!m.price || !product.cost) return <span style={{ fontSize: 12, color: '#9ca3af' }}>-</span>
+  const color = margeColor(m.margePct)
+  return (
+    <div>
+      <span style={{ fontSize: 12, fontWeight: 700, color }}>Marge nette : {formatCurrency(m.margeNette)} ({m.margePct.toFixed(0)}%)</span>
+      <div style={{ fontSize: 10, color: '#9ca3af' }}>après FBA, logistique et pub</div>
+    </div>
+  )
 }
 
 function StockBar({ stock, alerte }) {
@@ -36,8 +40,8 @@ function StockBar({ stock, alerte }) {
 
 export default function Produits() {
   const { user, setProducts: setStoreProducts } = useStore()
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { data: productsData, loading, reload } = useData('products', () => getProducts(user.id), [user])
+  const products = productsData || []
   const [showForm, setShowForm] = useState(false)
   const [editProduct, setEditProduct] = useState(null)
   const [search, setSearch] = useState('')
@@ -46,19 +50,12 @@ export default function Produits() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { if (user) loadData() }, [user])
-
-  const loadData = async () => {
-    const { data } = await getProducts(user.id)
-    setProducts(data || [])
-    setStoreProducts(data || [])
-    setLoading(false)
-  }
+  useEffect(() => { if (productsData) setStoreProducts(productsData) }, [productsData, setStoreProducts])
 
   const openAdd = () => { setEditProduct(null); setForm(EMPTY_FORM); setShowForm(true) }
   const openEdit = (p) => {
     setEditProduct(p)
-    setForm({ asin: p.asin || '', name: p.name || '', price_current: p.price_current || '', cost: p.cost || '', stock_fba: p.stock_fba || '', stock_alerte: p.stock_alerte || 20, rating: p.rating || '', reviews_count: p.reviews_count || '', units_sold_30d: p.units_sold_30d || '', revenue_30d: p.revenue_30d || '', profit_30d: p.profit_30d || '', acos: p.acos || '', status: p.status || 'active' })
+    setForm({ asin: p.asin || '', name: p.name || '', price_current: p.price_current || '', cost: p.cost || '', fba_fee: p.fba_fee || '', shipping_cost: p.shipping_cost || '', stock_fba: p.stock_fba || '', stock_alerte: p.stock_alerte || 20, rating: p.rating || '', reviews_count: p.reviews_count || '', units_sold_30d: p.units_sold_30d || '', revenue_30d: p.revenue_30d || '', profit_30d: p.profit_30d || '', acos: p.acos || '', status: p.status || 'active' })
     setShowForm(true)
   }
 
@@ -69,17 +66,17 @@ export default function Produits() {
     for (const [k, v] of Object.entries(form)) {
       if (v !== '') d[k] = ['asin', 'name', 'status'].includes(k) ? v : Number(v)
     }
-    if (editProduct) await updateProduct(editProduct.id, d)
-    else await addProduct(user.id, d)
-    setShowForm(false)
+    const ok = editProduct
+      ? await mutate(() => updateProduct(editProduct.id, d), 'products', 'Produit modifié')
+      : await mutate(() => addProduct(user.id, d), 'products', 'Produit ajouté')
     setSaving(false)
-    loadData()
+    if (ok) { setShowForm(false); reload() }
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Supprimer ce produit ?')) return
-    await deleteProduct(id)
-    loadData()
+    const ok = await mutate(() => deleteProduct(id), 'products', 'Produit supprimé')
+    if (ok) reload()
   }
 
   const totalRevenue = products.reduce((a, p) => a + (p.revenue_30d || 0), 0)
@@ -128,7 +125,7 @@ export default function Produits() {
           { label: 'Produits actifs', value: products.filter(p => p.status === 'active').length, icon: '📦', color: '#6366f1' },
           { label: 'CA total (30j)', value: formatCurrency(totalRevenue), icon: '💰', color: '#f59e0b', sub: totalRevenue > 0 ? null : 'Renseignez les CA dans vos produits' },
           { label: 'Profit net (30j)', value: formatCurrency(totalProfit), icon: '📈', color: '#10b981', sub: totalProfit > 0 ? `Marge: ${avgMargin}%` : null },
-          { label: 'Stock critique', value: criticalCount, icon: '⚠️', color: criticalCount > 0 ? '#ef4444' : '#10b981', sub: criticalCount > 0 ? 'Reapprovisionnement urgent' : 'Tout est OK' },
+          { label: 'Stock critique', value: criticalCount, icon: '⚠️', color: criticalCount > 0 ? '#ef4444' : '#10b981', sub: criticalCount > 0 ? 'Réapprovisionnement urgent' : 'Tout est OK' },
         ].map(k => (
           <div key={k.label} style={{ ...box, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -173,7 +170,7 @@ export default function Produits() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#fafaf8' }}>
-              {['Produit', 'Prix / Cout / Marge', 'Stock FBA', 'Ventes 30j', 'Profit 30j', 'ACOS', 'Note', 'Statut', 'Actions'].map(h => (
+              {['Produit', 'Prix / Coût / Marge', 'Stock FBA', 'Ventes 30j', 'Profit 30j', 'ACOS', 'Note', 'Statut', 'Actions'].map(h => (
                 <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -194,7 +191,7 @@ export default function Produits() {
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{formatCurrency(p.price_current || 0)}</div>
                     <div style={{ fontSize: 11, color: '#9ca3af' }}>Revient: {formatCurrency(p.cost || 0)}</div>
-                    <MarginBadge price={p.price_current} cost={p.cost} />
+                    <NetMarginBadge product={p} />
                   </td>
                   <td style={{ padding: '12px 16px', minWidth: 120 }}>
                     <StockBar stock={p.stock_fba || 0} alerte={p.stock_alerte || 20} />
@@ -202,11 +199,20 @@ export default function Produits() {
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{formatCurrency(p.revenue_30d || 0)}</div>
-                    <div style={{ fontSize: 11, color: '#9ca3af' }}>{formatNumber(p.units_sold_30d || 0)} unites</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af' }}>{formatNumber(p.units_sold_30d || 0)} unités</div>
                   </td>
                   <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: (p.profit_30d || 0) >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(p.profit_30d || 0)}</div>
-                    {margin !== null && <div style={{ fontSize: 11, color: '#9ca3af' }}>Marge: {margin}%</div>}
+                    {(() => {
+                      const m = computeProfit(p)
+                      const profit = m.units > 0 ? m.profitNet30d : (p.profit_30d || 0)
+                      const pct = m.units > 0 ? m.margePct : (margin !== null ? parseFloat(margin) : 0)
+                      return (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: profit >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(profit)}</div>
+                          {pct !== 0 && <div style={{ fontSize: 11, color: margeColor(pct) }}>Marge: {pct.toFixed(1)}%</div>}
+                        </>
+                      )
+                    })()}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {p.acos > 0 ? (
@@ -227,7 +233,7 @@ export default function Produits() {
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => openEdit(p)} style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, background: '#6366f110', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Editer</button>
+                      <button onClick={() => openEdit(p)} style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, background: '#6366f110', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Éditer</button>
                       <button onClick={() => handleDelete(p.id)} style={{ fontSize: 12, color: '#ef4444', background: '#ef444410', border: 'none', padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}>Suppr.</button>
                     </div>
                   </td>
@@ -239,7 +245,7 @@ export default function Produits() {
         {filtered.length === 0 && (
           <div style={{ padding: '60px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>📦</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>{search ? 'Aucun produit trouve' : 'Aucun produit pour le moment'}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>{search ? 'Aucun produit trouvé' : 'Aucun produit pour le moment'}</div>
             <div style={{ fontSize: 13, color: '#9ca3af' }}>{search ? 'Essayez un autre terme de recherche' : 'Cliquez sur "+ Ajouter un produit" pour commencer'}</div>
           </div>
         )}
@@ -266,17 +272,24 @@ export default function Produits() {
             <input style={inp} type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Kit ampoules H7 LED..." required />
           </div>
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Prix & Rentabilite</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Prix & Rentabilité</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
               <div><label style={lbl}>Prix de vente (€)</label><input style={inp} type="number" step="0.01" value={form.price_current} onChange={e => setForm({...form, price_current: e.target.value})} placeholder="29.99" /></div>
               <div><label style={lbl}>Prix de revient (€)</label><input style={inp} type="number" step="0.01" value={form.cost} onChange={e => setForm({...form, cost: e.target.value})} placeholder="8.50" /></div>
+              <div><label style={lbl}>Frais FBA (€)</label><input style={inp} type="number" step="0.01" value={form.fba_fee} onChange={e => setForm({...form, fba_fee: e.target.value})} placeholder="4.50" /></div>
+              <div><label style={lbl}>Logistique (€)</label><input style={inp} type="number" step="0.01" value={form.shipping_cost} onChange={e => setForm({...form, shipping_cost: e.target.value})} placeholder="1.20" /></div>
               <div><label style={lbl}>ACOS (%)</label><input style={inp} type="number" step="0.1" value={form.acos} onChange={e => setForm({...form, acos: e.target.value})} placeholder="22" /></div>
             </div>
-            {form.price_current && form.cost && (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#10b981', fontWeight: 600 }}>
-                Marge brute : {(((form.price_current - form.cost) / form.price_current) * 100).toFixed(1)}%
-              </div>
-            )}
+            {form.price_current && form.cost && (() => {
+              const m = computeProfit({ price_current: form.price_current, cost: form.cost, fba_fee: form.fba_fee, shipping_cost: form.shipping_cost, acos: form.acos })
+              return (
+                <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, display: 'flex', gap: 16 }}>
+                  <span style={{ color: margeColor(m.margePct) }}>Marge nette : {m.margeNette.toFixed(2)} € ({m.margePct.toFixed(1)}%)</span>
+                  <span style={{ color: '#9ca3af' }}>Brute : {m.margeBrute.toFixed(2)} €</span>
+                  {m.breakEvenAcos > 0 && <span style={{ color: '#9ca3af' }}>ACOS break-even : {m.breakEvenAcos.toFixed(0)}%</span>}
+                </div>
+              )
+            })()}
           </div>
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 14, marginBottom: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Stock FBA</div>
@@ -288,7 +301,7 @@ export default function Produits() {
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 14, marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Performances 30 jours</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-              <div><label style={lbl}>Unites vendues</label><input style={inp} type="number" value={form.units_sold_30d} onChange={e => setForm({...form, units_sold_30d: e.target.value})} placeholder="120" /></div>
+              <div><label style={lbl}>Unités vendues</label><input style={inp} type="number" value={form.units_sold_30d} onChange={e => setForm({...form, units_sold_30d: e.target.value})} placeholder="120" /></div>
               <div><label style={lbl}>CA (€)</label><input style={inp} type="number" step="0.01" value={form.revenue_30d} onChange={e => setForm({...form, revenue_30d: e.target.value})} placeholder="3598" /></div>
               <div><label style={lbl}>Profit net (€)</label><input style={inp} type="number" step="0.01" value={form.profit_30d} onChange={e => setForm({...form, profit_30d: e.target.value})} placeholder="950" /></div>
               <div><label style={lbl}>Nb avis</label><input style={inp} type="number" value={form.reviews_count} onChange={e => setForm({...form, reviews_count: e.target.value})} placeholder="342" /></div>

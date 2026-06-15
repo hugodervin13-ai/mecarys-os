@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import { useStore } from '../lib/store'
+import { ToastContainer } from './ui'
 
 export default function Layout() {
   const { sidebarOpen } = useStore()
@@ -16,6 +17,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <ToastContainer />
     </div>
   )
 }

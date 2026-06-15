@@ -1,19 +1,18 @@
 import { useEffect, useState } from 'react'
 import { getShipments, addShipment, deleteShipment, updateShipment } from '../lib/supabase'
-import { useStore } from '../lib/store'
+import { useStore, toast } from '../lib/store'
+import { mutate } from '../lib/useData'
+import { box, inp, lbl } from '../lib/theme'
+import { DemoBadge, KpiCard, EmptyState } from '../components/ui'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
-
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
-const inp = { width: '100%', padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
-const lbl = { fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 5, display: 'block' }
 
 const STATUS = {
   production: { label: 'Production',   color: '#6366f1', icon: '🏭' },
   transit:    { label: 'En transit',   color: '#3b82f6', icon: '🚢' },
   customs:    { label: 'En douane',    color: '#f59e0b', icon: '🛃' },
-  warehouse:  { label: 'Entrepot',     color: '#10b981', icon: '🏬' },
-  delivered:  { label: 'Livre',        color: '#10b981', icon: '✅' },
+  warehouse:  { label: 'Entrepôt',     color: '#10b981', icon: '🏬' },
+  delivered:  { label: 'Livré',        color: '#10b981', icon: '✅' },
   fba:        { label: 'Amazon FBA',   color: '#10b981', icon: '📦' },
 }
 
@@ -101,6 +100,7 @@ export default function Expeditions() {
   const loadData = async () => {
     const { data, error } = await getShipments(user.id)
     if (error || !data || data.length === 0) {
+      if (error) toast(`Erreur de chargement : ${error.message || 'réessayez plus tard'}`)
       setShipments(mockShipments)
       setUseMock(true)
     } else {
@@ -125,8 +125,8 @@ export default function Expeditions() {
     if (useMock) {
       setShipments(prev => [...prev, { ...shipmentData, id: `m${Date.now()}`, tracking_number: form.tracking_number || null }])
     } else {
-      await addShipment(user.id, shipmentData)
-      await loadData()
+      const ok = await mutate(() => addShipment(user.id, shipmentData), 'shipments')
+      if (ok) await loadData()
     }
     setForm(emptyForm)
     setShowForm(false)
@@ -137,18 +137,18 @@ export default function Expeditions() {
     if (useMock || String(id).startsWith('m')) {
       setShipments(prev => prev.map(s => s.id === id ? { ...s, status: newStatus } : s))
     } else {
-      await updateShipment(id, { status: newStatus })
-      loadData()
+      const ok = await mutate(() => updateShipment(id, { status: newStatus }), 'shipments')
+      if (ok) loadData()
     }
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Supprimer cette expedition ?')) return
+    if (!confirm('Supprimer cette expédition ?')) return
     if (useMock || String(id).startsWith('m')) {
       setShipments(prev => prev.filter(s => s.id !== id))
     } else {
-      await deleteShipment(id)
-      loadData()
+      const ok = await mutate(() => deleteShipment(id), 'shipments')
+      if (ok) loadData()
     }
   }
 
@@ -156,8 +156,8 @@ export default function Expeditions() {
     if (useMock || String(id).startsWith('m')) {
       setShipments(prev => prev.map(s => s.id === id ? { ...s, tracking_number: trackingInput } : s))
     } else {
-      await updateShipment(id, { tracking_number: trackingInput })
-      loadData()
+      const ok = await mutate(() => updateShipment(id, { tracking_number: trackingInput }), 'shipments')
+      if (ok) loadData()
     }
     setEditingTracking(null)
   }
@@ -174,12 +174,15 @@ export default function Expeditions() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Expeditions</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Suivez vos envois fournisseurs jusqu'aux entrepots Amazon FBA</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Expéditions</h1>
+            {useMock && <DemoBadge />}
+          </div>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Suivez vos envois fournisseurs jusqu'aux entrepôts Amazon FBA</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          + Nouvelle expedition
+          + Nouvelle expédition
         </button>
       </div>
 
@@ -187,30 +190,17 @@ export default function Expeditions() {
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 20 }}>🛃</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>{inCustoms} expedition{inCustoms > 1 ? 's' : ''} bloquee{inCustoms > 1 ? 's' : ''} en douane</div>
-            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Verifiez la documentation douaniere et contactez votre transitaire</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>{inCustoms} expédition{inCustoms > 1 ? 's' : ''} bloquée{inCustoms > 1 ? 's' : ''} en douane</div>
+            <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>Vérifiez la documentation douanière et contactez votre transitaire</div>
           </div>
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
-        {[
-          { label: 'En cours', value: inTransit, icon: '🚢', color: '#3b82f6', sub: 'En route vers FBA' },
-          { label: 'En douane', value: inCustoms, icon: '🛃', color: inCustoms > 0 ? '#f59e0b' : '#10b981', sub: inCustoms > 0 ? 'Attention requise' : 'Aucun blocage' },
-          { label: 'Livrees', value: delivered, icon: '✅', color: '#10b981', sub: 'Dans les entrepots' },
-          { label: 'Unites en transit', value: totalItems.toLocaleString(), icon: '📦', color: '#6366f1', sub: `${withTracking} avec suivi` },
-        ].map(k => (
-          <div key={k.label} style={{ ...box, padding: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <p style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{k.label}</p>
-                <p style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e' }}>{k.value}</p>
-                <p style={{ fontSize: 11, color: k.color, marginTop: 4, fontWeight: 500 }}>{k.sub}</p>
-              </div>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
-            </div>
-          </div>
-        ))}
+        <KpiCard label="En cours" value={inTransit} icon="🚢" color="#3b82f6" sub="En route vers FBA" />
+        <KpiCard label="En douane" value={inCustoms} icon="🛃" color={inCustoms > 0 ? '#f59e0b' : '#10b981'} sub={inCustoms > 0 ? 'Attention requise' : 'Aucun blocage'} />
+        <KpiCard label="Livrées" value={delivered} icon="✅" color="#10b981" sub="Dans les entrepôts" />
+        <KpiCard label="Unités en transit" value={totalItems.toLocaleString()} icon="📦" color="#6366f1" sub={`${withTracking} avec suivi`} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -227,7 +217,7 @@ export default function Expeditions() {
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', fontFamily: 'monospace' }}>{s.reference}</div>
                     <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                      {s.origin} → {s.destination} · {carrierInfo.name} · <strong>{s.items} unites</strong>
+                      {s.origin} → {s.destination} · {carrierInfo.name} · <strong>{s.items} unités</strong>
                     </div>
                   </div>
                 </div>
@@ -279,27 +269,25 @@ export default function Expeditions() {
           )
         })}
         {shipments.length === 0 && (
-          <div style={{ ...box, padding: '60px 20px', textAlign: 'center' }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🚢</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Aucune expedition en cours</div>
-            <div style={{ fontSize: 13, color: '#9ca3af' }}>Creez une expedition pour suivre vos envois fournisseurs</div>
+          <div style={box}>
+            <EmptyState icon="🚢" title="Aucune expédition en cours" subtitle="Créez une expédition pour suivre vos envois fournisseurs" />
           </div>
         )}
       </div>
 
       <div style={{ marginTop: 14, padding: '14px 18px', background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>💡 Suivi en temps reel</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>💡 Suivi en temps réel</div>
         <div style={{ fontSize: 12, color: '#1e3a5f' }}>
-          Renseignez votre numero de suivi et cliquez dessus pour etre redirige vers le site du transporteur (DHL, FedEx, UPS, CMA CGM, Maersk, MSC, etc.) et voir le statut en temps reel de votre expedition.
+          Renseignez votre numéro de suivi et cliquez dessus pour être redirigé vers le site du transporteur (DHL, FedEx, UPS, CMA CGM, Maersk, MSC, etc.) et voir le statut en temps réel de votre expédition.
         </div>
       </div>
 
-      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle expedition">
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle expédition">
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={lbl}>Reference</label>
-              <input style={inp} type="text" placeholder="Auto-genere si vide" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
+              <label style={lbl}>Référence</label>
+              <input style={inp} type="text" placeholder="Auto-généré si vide" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
             </div>
             <div>
               <label style={lbl}>Transporteur *</label>
@@ -309,7 +297,7 @@ export default function Expeditions() {
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={lbl}>Numero de suivi</label>
+            <label style={lbl}>Numéro de suivi</label>
             <input style={{ ...inp, fontFamily: 'monospace' }} type="text" placeholder="Ex: 1234567890, CMAU1234567..." value={form.tracking_number} onChange={e => setForm({ ...form, tracking_number: e.target.value })} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -324,7 +312,7 @@ export default function Expeditions() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
             <div>
-              <label style={lbl}>Unites *</label>
+              <label style={lbl}>Unités *</label>
               <input style={inp} type="number" min="1" value={form.items} onChange={e => setForm({ ...form, items: e.target.value })} required />
             </div>
             <div>
@@ -340,7 +328,7 @@ export default function Expeditions() {
           </div>
           <button type="submit" disabled={saving}
             style={{ width: '100%', padding: '12px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Creation...' : "Creer l'expedition"}
+            {saving ? 'Création...' : "Créer l'expédition"}
           </button>
         </form>
       </Modal>

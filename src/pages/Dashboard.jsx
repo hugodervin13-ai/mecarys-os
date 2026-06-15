@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getProducts, getAlerts } from '../lib/supabase'
+import { computeAlerts, SEVERITY } from '../lib/alertsEngine'
 import { useStore } from '../lib/store'
+import { useData } from '../lib/useData'
 import { formatNumber } from '../lib/utils'
+import { box } from '../lib/theme'
+import { DemoBadge } from '../components/ui'
 import KPICard from '../components/KPICard'
 import Loading from '../components/Loading'
 import {
@@ -21,7 +25,7 @@ const DATA = {
       { date: '5 mai', v: 28500 }, { date: '12 mai', v: 32000 },
     ],
     '90j': [
-      { date: 'Fev', v: 62000 }, { date: 'Mars', v: 95000 },
+      { date: 'Fév', v: 62000 }, { date: 'Mars', v: 95000 },
       { date: 'Avr', v: 118000 }, { date: 'Mai', v: 141000 },
       { date: 'Juin', v: 158000 }, { date: 'Juil', v: 174000 },
     ],
@@ -37,7 +41,7 @@ const DATA = {
       { date: '5 mai', v: 6800 }, { date: '12 mai', v: 7500 },
     ],
     '90j': [
-      { date: 'Fev', v: 15600 }, { date: 'Mars', v: 23800 },
+      { date: 'Fév', v: 15600 }, { date: 'Mars', v: 23800 },
       { date: 'Avr', v: 29700 }, { date: 'Mai', v: 35300 },
       { date: 'Juin', v: 39700 }, { date: 'Juil', v: 43600 },
     ],
@@ -58,18 +62,13 @@ const tracked = [
   { asin: 'B0C1234567', price: '25,50', chg: -0.20, rating: 4.0, rev: 532 },
 ]
 
-const alertsList = [
-  { id: 1, msg: 'Stock faible sur 3 produits', icon: '⚠️', link: '/stock' },
-  { id: 2, msg: 'Rupture de stock imminent (7 jours)', icon: '🔴', link: '/stock' },
-  { id: 3, msg: 'Retour produit en hausse', icon: '📦', link: '/qualite-sav' },
-  { id: 4, msg: 'Prix concurrent en baisse sur 2 ASIN', icon: '💰', link: '/concurrents' },
-]
+const ALERT_LINKS = { stock: '/stock', marge: '/produits', acos: '/produits', avis: '/qualite-sav' }
 
 const pipe = [
   { label: 'Production', n: 3, color: '#6366f1', bg: '#6366f110', icon: '🏭' },
   { label: 'En transit', n: 2, color: '#3b82f6', bg: '#3b82f610', icon: '🚢' },
   { label: 'Douane', n: 1, color: '#ef4444', bg: '#ef444410', icon: '🛃' },
-  { label: 'En entrepot', n: 1, color: '#f59e0b', bg: '#f59e0b10', icon: '📦' },
+  { label: 'En entrepôt', n: 1, color: '#f59e0b', bg: '#f59e0b10', icon: '📦' },
   { label: 'Amazon FBA', n: 2, color: '#10b981', bg: '#10b98110', icon: '📦' },
 ]
 
@@ -78,15 +77,12 @@ const MOCK_ANALYSIS = {
   'B09X1ZZKZL': { score: 72, title: 'Filtre à huile universel', price: '29,90 €', rating: '4.1/5', reviews: '842', bsr: '#891 Auto', opportunities: ['Images de qualité à améliorer', 'Cibler les mots-clés "compatible BMW"'], risks: ['Stock limité chez fournisseur', 'Prix instable'] },
 }
 
-const box = { background: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 14 }
 const ttp = { backgroundColor: '#fff', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 12, padding: '8px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }
 const selStyle = { background: '#fafaf8', border: '1px solid #e8e8e3', color: '#6b7280', fontSize: 11, borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user, setProducts, setAlerts: setStoreAlerts } = useStore()
-  const [loading, setLoading] = useState(true)
-  const [products, setP] = useState([])
   const [kpiPeriod, setKpiPeriod] = useState('30j')
   const [salesPeriod, setSalesPeriod] = useState('30j')
   const [profitPeriod, setProfitPeriod] = useState('30j')
@@ -94,17 +90,34 @@ export default function Dashboard() {
   const [analysisResult, setAnalysisResult] = useState(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
 
-  useEffect(() => { if (user) load() }, [user])
-  const load = async () => {
-    const [pr, al] = await Promise.all([getProducts(user.id), getAlerts(user.id)])
-    setP(pr.data || [])
-    setProducts(pr.data || [])
-    setStoreAlerts(al.data || [])
-    setLoading(false)
-  }
+  const { data: productsData, loading: productsLoading } = useData('products', () => getProducts(user.id), [user])
+  const { data: alertsData, loading: alertsLoading } = useData('alerts', () => getAlerts(user.id), [user])
+  const products = productsData || []
+  const loading = productsLoading || alertsLoading
+
+  useEffect(() => { if (productsData) setProducts(productsData) }, [productsData, setProducts])
+  useEffect(() => { if (alertsData) setStoreAlerts(alertsData) }, [alertsData, setStoreAlerts])
 
   const stock = products.reduce((a, p) => a + (p.stock_fba || 0), 0) || 4782
   const kpi = KPI_BY_PERIOD[kpiPeriod]
+
+  const realAlerts = computeAlerts(products || [])
+  const severityCounts = realAlerts.reduce((acc, a) => { acc[a.severity] = (acc[a.severity] || 0) + 1; return acc }, {})
+  const dbAlerts = alertsData || []
+
+  const alertsList = realAlerts.length > 0
+    ? realAlerts.slice(0, 5).map((a, i) => ({
+        id: i,
+        icon: SEVERITY[a.severity]?.icon || '🔵',
+        msg: a.message,
+        link: ALERT_LINKS[a.type] || '/produits',
+      }))
+    : dbAlerts.slice(0, 5).map((a, i) => ({
+        id: a.id || i,
+        icon: a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟠' : '🔵',
+        msg: a.message || 'Alerte',
+        link: ALERT_LINKS[a.type] || '/produits',
+      }))
 
   const handleAnalyse = async () => {
     if (!asinInput.trim()) return
@@ -133,10 +146,10 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Bonjour Hugo 👋</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>Voici la performance de votre activite Amazon.</p>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>Voici la performance de votre activité Amazon.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #e8e8e3', borderRadius: 10, padding: '6px 10px' }}>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>Periode KPI :</span>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Période KPI :</span>
           {['7j', '30j', '90j'].map(p => (
             <button
               key={p}
@@ -156,7 +169,7 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 22 }}>
         <KPICard title={`Chiffre d'affaires (${kpiPeriod})`} value={kpi.ca} change={kpi.caChange} icon="💰" color="#f59e0b" />
         <KPICard title={`Profit net (${kpiPeriod})`} value={kpi.profit} change={kpi.profitChange} icon="📊" color="#10b981" />
-        <KPICard title={`Unites vendues (${kpiPeriod})`} value={kpi.units} change={kpi.unitsChange} icon="📦" color="#3b82f6" />
+        <KPICard title={`Unités vendues (${kpiPeriod})`} value={kpi.units} change={kpi.unitsChange} icon="📦" color="#3b82f6" />
         <KPICard title="ACOS" value={kpi.acos} change={kpi.acosChange} icon="🎯" color="#ef4444" />
         <KPICard title="Stock total FBA" value={formatNumber(stock)} change={3.1} icon="🏭" color="#6366f1" />
       </div>
@@ -169,6 +182,7 @@ export default function Dashboard() {
             <div>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>Ventes </span>
               <span style={{ fontSize: 12, color: '#9ca3af' }}>({PERIOD_LABELS[salesPeriod]})</span>
+              {' '}<DemoBadge />
             </div>
             <select
               value={salesPeriod}
@@ -200,6 +214,7 @@ export default function Dashboard() {
             <div>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>Profit net </span>
               <span style={{ fontSize: 12, color: '#9ca3af' }}>({PERIOD_LABELS[profitPeriod]})</span>
+              {' '}<DemoBadge />
             </div>
             <select
               value={profitPeriod}
@@ -267,7 +282,12 @@ export default function Dashboard() {
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 14 }}>🚨</span> Alertes
             </div>
-            {alertsList.map(a => (
+            {alertsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                <span style={{ fontSize: 20 }}>✅</span>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Aucune alerte</div>
+              </div>
+            ) : alertsList.map(a => (
               <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
                   <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{a.icon}</span>
@@ -288,7 +308,7 @@ export default function Dashboard() {
         {/* ASIN Analysis */}
         <div style={{ ...box, padding: 18 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Analyse IA d'un ASIN</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Collez un ASIN et obtenez une analyse complete + recommandations.</p>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Collez un ASIN et obtenez une analyse complète + recommandations.</p>
           <input
             placeholder="Ex: B08N5WRWNW"
             value={asinInput}
@@ -328,9 +348,9 @@ export default function Dashboard() {
           onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
         >
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Suivi concurrentiel</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Suivez vos concurrents : prix, avis, stock, evolution quotidienne.</p>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Suivez vos concurrents : prix, avis, stock, évolution quotidienne.</p>
           <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>📊</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Acceder →</div>
+          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
         </div>
 
         <div
@@ -339,10 +359,10 @@ export default function Dashboard() {
           onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
           onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
         >
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Amelioration de listing</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Obtenez des idees pour ameliorer votre fiche produit et booster vos ventes.</p>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Amélioration de listing</div>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Obtenez des idées pour améliorer votre fiche produit et booster vos ventes.</p>
           <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>📝</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Acceder →</div>
+          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
         </div>
 
         <div
@@ -351,17 +371,17 @@ export default function Dashboard() {
           onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
           onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
         >
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Idees produit</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Trouvez des idees de produits rentables avec notre IA.</p>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Idées produit</div>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Trouvez des idées de produits rentables avec notre IA.</p>
           <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>💡</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Acceder →</div>
+          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
         </div>
       </div>
 
       {/* Pipeline + Shortcuts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, marginBottom: 22 }}>
         <div style={{ ...box, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 16 }}>Pipeline reapprovisionnement</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 16 }}>Pipeline réapprovisionnement</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {pipe.map((s, i) => (
               <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
@@ -414,12 +434,12 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
         <div style={{ ...box, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 14 }}>⚠️</span> Derniers avis clients negatifs
+            <span style={{ fontSize: 14 }}>⚠️</span> Derniers avis clients négatifs
           </div>
           <div style={{ background: '#fafaf8', borderRadius: 10, padding: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-              <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, flex: 1 }}>Produit conforme mais l'emballage etait abime.</span>
-              <span style={{ fontSize: 10, background: '#10b98115', color: '#10b981', padding: '3px 10px', borderRadius: 20, marginLeft: 8, whiteSpace: 'nowrap', fontWeight: 600 }}>Qualite</span>
+              <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, flex: 1 }}>Produit conforme mais l'emballage était abîmé.</span>
+              <span style={{ fontSize: 10, background: '#10b98115', color: '#10b981', padding: '3px 10px', borderRadius: 20, marginLeft: 8, whiteSpace: 'nowrap', fontWeight: 600 }}>Qualité</span>
             </div>
             <span style={{ fontSize: 11, color: '#9ca3af' }}>ASIN: B08N5WRWNW · Il y a 2h</span>
           </div>
@@ -433,10 +453,10 @@ export default function Dashboard() {
 
         <div style={{ ...box, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            ⭐ Prochaines taches
+            ⭐ Prochaines tâches
           </div>
           {[
-            { t: 'Commander reassort kit phare', d: '14 mai', done: false },
+            { t: 'Commander réassort kit phare', d: '14 mai', done: false },
             { t: 'Demander certificat CE fournisseur', d: '15 mai', done: false },
             { t: 'Optimiser listing ASIN B08N5WRWNW', d: '16 mai', done: false },
           ].map((t, i) => (
@@ -454,7 +474,7 @@ export default function Dashboard() {
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             📝 Notes rapides
           </div>
-          <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.7, marginBottom: 6 }}>Relancer usine pour ameliorer le packaging.</p>
+          <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.7, marginBottom: 6 }}>Relancer usine pour améliorer le packaging.</p>
           <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>Tester nouveau visuel principal la semaine prochaine.</p>
         </div>
       </div>
