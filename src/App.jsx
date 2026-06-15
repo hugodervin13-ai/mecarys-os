@@ -17,7 +17,6 @@ const Fournisseurs = lazy(() => import('./pages/Fournisseurs'))
 const Commandes = lazy(() => import('./pages/Commandes'))
 const Expeditions = lazy(() => import('./pages/Expeditions'))
 const Stock = lazy(() => import('./pages/Stock'))
-const QualiteSAV = lazy(() => import('./pages/QualiteSAV'))
 const Documents = lazy(() => import('./pages/Documents'))
 const Parametres = lazy(() => import('./pages/Parametres'))
 const NotFound = lazy(() => import('./pages/NotFound'))
@@ -51,7 +50,6 @@ function App() {
             ['/commandes', Commandes],
             ['/expeditions', Expeditions],
             ['/stock', Stock],
-            ['/qualite-sav', QualiteSAV],
             ['/documents', Documents],
             ['/parametres', Parametres],
             ['*', NotFound],

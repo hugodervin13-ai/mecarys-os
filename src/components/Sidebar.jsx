@@ -11,7 +11,6 @@ const menuItems = [
   { label: 'Commandes', path: '/commandes', icon: 'clipboard', color: '#f97316' },
   { label: 'Expeditions', path: '/expeditions', icon: 'truck', color: '#3b82f6' },
   { label: 'Stock', path: '/stock', icon: 'archive', color: '#14b8a6' },
-  { label: 'Qualite & SAV', path: '/qualite-sav', icon: 'shield', color: '#ec4899' },
   { label: 'Documents', path: '/documents', icon: 'file', color: '#64748b' },
   { label: 'Parametres', path: '/parametres', icon: 'settings', color: '#6b7280' },
 ]
