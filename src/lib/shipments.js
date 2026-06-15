@@ -10,15 +10,10 @@
 // Aucune donnée fictive n'est réinjectée automatiquement.
 
 // ---------- Types de transport ----------
-// Chaque type : icône, couleur, délai estimatif (jours), tarif au kg ($/kg).
-// Tarifs fournis : bateau 1.44 $/kg, camion 2.34 $/kg.
-// Les autres (avion/train/express) sont des estimations marché modifiables.
+// Tarifs : bateau 1.44 $/kg, camion 2.34 $/kg.
 export const TRANSPORT_TYPES = {
-  avion:   { label: 'Avion',   icon: '✈️', color: '#3b82f6', days: 7,  ratePerKg: 5.50 },
-  bateau:  { label: 'Bateau',  icon: '🚢', color: '#0ea5e9', days: 35, ratePerKg: 1.44 },
-  camion:  { label: 'Camion',  icon: '🚚', color: '#f59e0b', days: 10, ratePerKg: 2.34 },
-  train:   { label: 'Train',   icon: '🚆', color: '#8b5cf6', days: 20, ratePerKg: 1.90 },
-  express: { label: 'Express', icon: '⚡', color: '#ef4444', days: 4,  ratePerKg: 8.00 },
+  bateau: { label: 'Bateau', icon: '🚢', color: '#0ea5e9', days: 50, ratePerKg: 1.44 },
+  camion: { label: 'Camion', icon: '🚚', color: '#f59e0b', days: 25, ratePerKg: 2.34 },
 }
 
 // Taux de conversion indicatif USD → EUR (les tarifs au kg sont en $/kg,
@@ -307,7 +302,7 @@ export function demoShipments() {
     },
     {
       id: newId(), reference: 'EXP-2026-002', supplier: 'Guangzhou Home', product: 'Lampe LED bureau',
-      quantity: 300, country_from: 'Chine', country_to: 'Allemagne', carrier: 'dhl', transport_type: 'avion',
+      quantity: 300, country_from: 'Chine', country_to: 'Allemagne', carrier: 'dhl', transport_type: 'camion',
       tracking_number: '', transport_cost: 2400, status: 'customs',
       order_date: iso(-25), departure_date: iso(-9), eta: iso(-2), actual_arrival: '', notes: 'Vérifier HS code', archived: false,
     },
