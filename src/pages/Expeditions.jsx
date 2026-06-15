@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useStore } from '../lib/store'
+import { useStore, toast } from '../lib/store'
 import { box, inp, lbl, colors } from '../lib/theme'
 import { KpiCard, EmptyState, PageHeader } from '../components/ui'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
+import { getProducts, getSuppliers, updateProduct } from '../lib/supabase'
+import { mutate } from '../lib/useData'
 import {
   TRANSPORT_TYPES, STATUS, STATUS_FLOW, TIMELINE_STEPS, CARRIERS, trackingUrl,
   emptyShipment, transportDuration, delayDays, unitCost, computeStats,
-  computeShipmentAlerts, computeAllAlerts, loadShipments, saveShipments,
-  newId, autoReference, demoShipments,
+  computeShipmentAlerts, computeAllAlerts, newId, autoReference, demoShipments,
+  estimateCostFromWeight, computeEta, shippingCostByProduct, downloadCsv,
+  ensureNotificationPermission, notifyCriticalAlerts,
 } from '../lib/shipments'
-import { toast } from '../lib/store'
+import {
+  listShipments, createShipment, saveShipment, removeShipment, isDbAvailable,
+} from '../lib/shipmentsRepo'
 
 const SEVERITY_STYLE = {
   critical: { bg: '#fef2f2', border: '#fecaca', color: '#b91c1c' },
@@ -20,8 +25,6 @@ const SEVERITY_STYLE = {
 
 // ---------- Timeline automatique ----------
 function ProgressSteps({ status }) {
-  // Si le statut courant n'est pas une étape de timeline (draft/closed),
-  // on rattache l'index logique : draft → avant tout, closed → tout validé.
   const flowIdx = STATUS_FLOW.indexOf(status)
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', marginTop: 14, overflowX: 'auto' }}>
@@ -80,70 +83,128 @@ export default function Expeditions() {
   const uid = user?.id
   const [shipments, setShipments] = useState([])
   const [loaded, setLoaded] = useState(false)
+  const [synced, setSynced] = useState(false)
+  const [products, setProducts] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyShipment())
   const [editingId, setEditingId] = useState(null)
   const [search, setSearch] = useState('')
   const [filters, setFilters] = useState({ status: '', carrier: '', transport_type: '', country: '' })
   const [showArchived, setShowArchived] = useState(false)
+  const [showCostPanel, setShowCostPanel] = useState(false)
+  const [notifOn, setNotifOn] = useState(typeof Notification !== 'undefined' && Notification.permission === 'granted')
 
-  // Chargement initial depuis localStorage (persistant).
+  // Chargement initial : local instantané + synchro DB best-effort.
   useEffect(() => {
-    setShipments(loadShipments(uid))
-    setLoaded(true)
+    let alive = true
+    listShipments(uid).then(({ data, synced }) => {
+      if (!alive) return
+      setShipments(data)
+      setSynced(synced)
+      setLoaded(true)
+    })
+    // Catalogue produits & fournisseurs pour les sélecteurs (best-effort).
+    getProducts(uid).then(({ data }) => alive && setProducts(data || [])).catch(() => {})
+    getSuppliers(uid).then(({ data }) => alive && setSuppliers(data || [])).catch(() => {})
+    return () => { alive = false }
   }, [uid])
 
-  // Persistance automatique à chaque changement (après le chargement initial).
-  useEffect(() => {
-    if (loaded) saveShipments(uid, shipments)
-  }, [shipments, loaded, uid])
-
-  // ---------- CRUD ----------
+  // ---------- CRUD (toute persistance via le repo) ----------
   const openCreate = () => { setForm(emptyShipment()); setEditingId(null); setShowForm(true) }
   const openEdit = (s) => { setForm({ ...emptyShipment(), ...s }); setEditingId(s.id); setShowForm(true) }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     const data = {
       ...form,
       reference: form.reference?.trim() || autoReference(),
       quantity: form.quantity === '' ? '' : Number(form.quantity),
       transport_cost: form.transport_cost === '' ? '' : Number(form.transport_cost),
+      weight_kg: form.weight_kg === '' ? '' : Number(form.weight_kg),
     }
     if (editingId) {
-      setShipments(prev => prev.map(s => s.id === editingId ? { ...s, ...data } : s))
-      toast('Expédition mise à jour', 'success')
+      const next = await saveShipment(uid, { ...data, id: editingId })
+      setShipments(next); toast('Expédition mise à jour', 'success')
     } else {
-      setShipments(prev => [{ id: newId(), archived: false, ...data }, ...prev])
-      toast('Expédition créée', 'success')
+      const next = await createShipment(uid, { id: newId(), archived: false, ...data })
+      setShipments(next); toast('Expédition créée', 'success')
     }
-    setShowForm(false)
-    setEditingId(null)
-    setForm(emptyShipment())
+    setShowForm(false); setEditingId(null); setForm(emptyShipment())
   }
 
-  const handleStatusChange = (id, status) =>
-    setShipments(prev => prev.map(s => s.id === id ? { ...s, status } : s))
-
-  const handleDuplicate = (s) => {
-    setShipments(prev => [{ ...s, id: newId(), reference: `${s.reference}-COPIE`, status: 'draft', actual_arrival: '' }, ...prev])
-    toast('Expédition dupliquée', 'success')
+  const handleStatusChange = async (s, status) => {
+    const next = await saveShipment(uid, { ...s, status })
+    setShipments(next)
   }
-
-  const handleArchive = (id) =>
-    setShipments(prev => prev.map(s => s.id === id ? { ...s, archived: !s.archived } : s))
-
-  const handleDelete = (id) => {
+  const handleDuplicate = async (s) => {
+    const next = await createShipment(uid, { ...s, id: newId(), reference: `${s.reference}-COPIE`, status: 'draft', actual_arrival: '' })
+    setShipments(next); toast('Expédition dupliquée', 'success')
+  }
+  const handleArchive = async (s) => {
+    const next = await saveShipment(uid, { ...s, archived: !s.archived })
+    setShipments(next)
+  }
+  const handleDelete = async (id) => {
     if (!confirm('Supprimer définitivement cette expédition ?')) return
-    setShipments(prev => prev.filter(s => s.id !== id))
-    toast('Expédition supprimée', 'success')
+    const next = await removeShipment(uid, id)
+    setShipments(next); toast('Expédition supprimée', 'success')
+  }
+  const loadDemo = async () => {
+    let next = shipments
+    for (const d of demoShipments()) next = await createShipment(uid, d)
+    setShipments(next); toast('Données de démonstration chargées', 'info')
   }
 
-  const loadDemo = () => { setShipments(demoShipments()); toast('Données de démonstration chargées', 'info') }
+  // ---------- Sélecteurs liés au catalogue ----------
+  const onPickProduct = (name) => {
+    const p = products.find(p => p.name === name)
+    setForm(f => ({ ...f, product: name, product_id: p?.id || null, asin: p?.asin || '' }))
+  }
+  const onPickSupplier = (name) => {
+    const s = suppliers.find(s => s.name === name)
+    setForm(f => ({ ...f, supplier: name, supplier_id: s?.id || null }))
+  }
 
-  // ---------- Stats, alertes, filtres ----------
+  // ---------- Auto-ETA & estimation coût au poids ----------
+  const applyAutoEta = () => {
+    const eta = computeEta(form.departure_date, form.transport_type)
+    if (eta) setForm(f => ({ ...f, eta }))
+    else toast('Renseignez la date de départ pour calculer l’ETA', 'info')
+  }
+  const applyEstimatedCost = () => {
+    const c = estimateCostFromWeight(form.weight_kg, form.transport_type)
+    if (c != null) setForm(f => ({ ...f, transport_cost: c }))
+    else toast('Renseignez le poids (kg) pour estimer le coût', 'info')
+  }
+
+  // ---------- Intégration marge : appliquer le coût transport réel au produit ----------
+  const applyCostToProduct = async (item) => {
+    if (!item.product_id) { toast('Liez l’expédition à un produit du catalogue pour l’appliquer', 'info'); return }
+    if (!isDbAvailable()) { toast('Base non connectée : impossible d’écrire le coût produit', 'info'); return }
+    const ok = await mutate(() => updateProduct(item.product_id, { shipping_cost: +item.unitCost.toFixed(2) }), 'products')
+    if (ok) toast(`Coût transport ${item.unitCost.toFixed(2)} €/u appliqué à ${item.product}`, 'success')
+  }
+
+  // ---------- Export ----------
+  const exportCsv = () => downloadCsv(visible.length ? visible : shipments, `expeditions-${new Date().toISOString().slice(0, 10)}.csv`)
+  const exportPdf = () => window.print()
+  const toggleNotif = async () => {
+    if (notifOn) { setNotifOn(false); toast('Notifications désactivées', 'info'); return }
+    const ok = await ensureNotificationPermission()
+    setNotifOn(ok)
+    toast(ok ? 'Notifications activées' : 'Permission refusée par le navigateur', ok ? 'success' : 'error')
+  }
+
+  // ---------- Dérivés ----------
   const stats = useMemo(() => computeStats(shipments), [shipments])
   const alerts = useMemo(() => computeAllAlerts(shipments.filter(s => !s.archived)), [shipments])
+  const costByProduct = useMemo(() => shippingCostByProduct(shipments), [shipments])
+
+  // Notifications push sur alertes critiques.
+  useEffect(() => {
+    if (notifOn && loaded) notifyCriticalAlerts(uid, alerts)
+  }, [alerts, notifOn, loaded, uid])
 
   const countries = useMemo(() => {
     const set = new Set()
@@ -172,10 +233,18 @@ export default function Expeditions() {
   return (
     <div>
       <PageHeader title="Expéditions" subtitle="Pilotez vos importations fournisseurs jusqu'aux entrepôts Amazon FBA">
+        <button onClick={toggleNotif} title="Notifications alertes critiques" style={ghostBtn}>{notifOn ? '🔔 Alertes ON' : '🔕 Alertes'}</button>
+        <button onClick={exportCsv} style={ghostBtn}>⬇ CSV</button>
+        <button onClick={exportPdf} style={ghostBtn}>🖨 PDF</button>
         <button onClick={openCreate} style={{ padding: '10px 20px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           + Nouvelle expédition
         </button>
       </PageHeader>
+
+      <div style={{ marginBottom: 16, fontSize: 12, color: synced ? colors.success : colors.textFaint, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: synced ? colors.success : '#cbd5e1' }} />
+        {synced ? 'Synchronisé avec la base (multi-appareils)' : 'Sauvegarde locale active — synchro base dès connexion'}
+      </div>
 
       {/* Alertes dynamiques */}
       {alerts.length > 0 && (
@@ -192,7 +261,7 @@ export default function Expeditions() {
         </div>
       )}
 
-      {/* KPIs dynamiques (responsive) */}
+      {/* KPIs dynamiques */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 22 }}>
         <KpiCard label="En cours" value={stats.active} icon="🚢" color={colors.info} sub="En route vers FBA" />
         <KpiCard label="En douane" value={stats.customs} icon="🛃" color={stats.customs > 0 ? colors.warning : colors.success} sub={stats.customs > 0 ? 'Attention requise' : 'Aucun blocage'} />
@@ -200,7 +269,37 @@ export default function Expeditions() {
         <KpiCard label="Unités en transit" value={stats.unitsInTransit.toLocaleString('fr-FR')} icon="📦" color={colors.primary} sub={`${stats.withTracking} avec suivi`} />
       </div>
 
-      {/* Recherche + filtres (responsive) */}
+      {/* Panneau coût transport réel par produit */}
+      {costByProduct.length > 0 && (
+        <div style={{ ...box, padding: 16, marginBottom: 18 }}>
+          <button onClick={() => setShowCostPanel(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: colors.text }}>
+            💶 Coût transport réel par produit {showCostPanel ? '▾' : '▸'}
+            <span style={{ fontSize: 11, fontWeight: 500, color: colors.textFaint }}>({costByProduct.length})</span>
+          </button>
+          {showCostPanel && (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 12, color: colors.textMuted }}>Moyenne pondérée €/unité sur vos expéditions. « Appliquer » écrit ce coût dans la logistique du produit (calcul de marge nette).</div>
+              {costByProduct.map(item => (
+                <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 12px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb', flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                    {item.product || '—'} {item.asin && <span style={{ fontFamily: 'monospace', fontSize: 11, color: colors.primary }}>· {item.asin}</span>}
+                    <span style={{ fontSize: 11, color: colors.textFaint, marginLeft: 6 }}>{item.units} u · {item.count} exp.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: colors.primary }}>{item.unitCost.toFixed(2)} €/u</span>
+                    <button onClick={() => applyCostToProduct(item)} disabled={!item.product_id}
+                      style={{ padding: '6px 12px', background: item.product_id ? colors.primary : '#e8e8e3', color: item.product_id ? '#fff' : '#9ca3af', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: item.product_id ? 'pointer' : 'not-allowed' }}>
+                      Appliquer à la marge
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recherche + filtres */}
       <div style={{ ...box, padding: 14, marginBottom: 18, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <input style={{ ...inp, flex: '2 1 220px' }} placeholder="🔍 Référence, fournisseur, produit…" value={search} onChange={e => setSearch(e.target.value)} />
         <select style={{ ...inp, flex: '1 1 140px' }} value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}>
@@ -255,28 +354,28 @@ export default function Expeditions() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: 'monospace' }}>{s.reference}</span>
                       <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: `${tt.color}15`, color: tt.color }}>{tt.label} · ~{tt.days}j</span>
+                      {s.asin && <span style={{ fontSize: 10, fontFamily: 'monospace', color: colors.primary, background: '#eef2ff', padding: '2px 7px', borderRadius: 6 }}>{s.asin}</span>}
                     </div>
                     <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
                       {s.supplier && <strong>{s.supplier}</strong>}{s.supplier && ' · '}{s.product || 'Produit non renseigné'}
                     </div>
                     <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                      {(s.country_from || '?')} → {(s.country_to || '?')} · {carrierInfo.name} · <strong>{Number(s.quantity) || 0} unités</strong>
+                      {(s.country_from || '?')} → {(s.country_to || '?')} · {carrierInfo.name} · <strong>{Number(s.quantity) || 0} unités</strong>{s.weight_kg ? ` · ${s.weight_kg} kg` : ''}
                     </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <select value={s.status} onChange={e => handleStatusChange(s.id, e.target.value)}
+                  <select value={s.status} onChange={e => handleStatusChange(s, e.target.value)}
                     style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${st.color}40`, background: `${st.color}15`, color: st.color, fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
                     {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
                   </select>
                   <button onClick={() => openEdit(s)} title="Modifier" style={iconBtn}>✏️</button>
                   <button onClick={() => handleDuplicate(s)} title="Dupliquer" style={iconBtn}>⧉</button>
-                  <button onClick={() => handleArchive(s.id)} title={s.archived ? 'Désarchiver' : 'Archiver'} style={iconBtn}>🗄️</button>
+                  <button onClick={() => handleArchive(s)} title={s.archived ? 'Désarchiver' : 'Archiver'} style={iconBtn}>🗄️</button>
                   <button onClick={() => handleDelete(s.id)} title="Supprimer" style={{ ...iconBtn, color: colors.danger }}>🗑️</button>
                 </div>
               </div>
 
-              {/* Alertes spécifiques à la carte */}
               {cardAlerts.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
                   {cardAlerts.map((a, i) => {
@@ -286,7 +385,6 @@ export default function Expeditions() {
                 </div>
               )}
 
-              {/* Calculs automatiques */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
                 <Metric label="Coût transport" value={s.transport_cost ? `${Number(s.transport_cost).toLocaleString('fr-FR')} €` : '—'} />
                 <Metric label="Coût / unité" value={uc != null ? `${uc.toFixed(2)} €` : '—'} />
@@ -296,7 +394,6 @@ export default function Expeditions() {
                 <Metric label="Arrivée réelle" value={s.actual_arrival || '—'} />
               </div>
 
-              {/* Suivi */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', background: '#fafaf8', borderRadius: 8, border: '1px solid #f0f0eb', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>N° suivi :</span>
                 <TrackingBadge carrier={s.carrier} tracking={s.tracking_number} />
@@ -329,12 +426,18 @@ export default function Expeditions() {
       {/* Formulaire création / édition */}
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editingId ? "Modifier l'expédition" : 'Nouvelle expédition'}>
         <form onSubmit={handleSubmit}>
+          <datalist id="dl-products">{products.map(p => <option key={p.id} value={p.name} />)}</datalist>
+          <datalist id="dl-suppliers">{suppliers.map(s => <option key={s.id} value={s.name} />)}</datalist>
           <Row>
             <Field label="Référence"><input style={inp} value={form.reference} placeholder="Auto si vide" onChange={e => setForm({ ...form, reference: e.target.value })} /></Field>
-            <Field label="Fournisseur"><input style={inp} value={form.supplier} placeholder="Shenzhen Tech Co" onChange={e => setForm({ ...form, supplier: e.target.value })} /></Field>
+            <Field label="Fournisseur">
+              <input style={inp} list="dl-suppliers" value={form.supplier} placeholder="Choisir ou saisir" onChange={e => onPickSupplier(e.target.value)} />
+            </Field>
           </Row>
           <Row>
-            <Field label="Produit"><input style={inp} value={form.product} placeholder="Câble USB-C 2m" onChange={e => setForm({ ...form, product: e.target.value })} /></Field>
+            <Field label={`Produit${form.asin ? ` · ${form.asin}` : ''}`}>
+              <input style={inp} list="dl-products" value={form.product} placeholder="Choisir ou saisir" onChange={e => onPickProduct(e.target.value)} />
+            </Field>
             <Field label="Quantité *"><input style={inp} type="number" min="1" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} required /></Field>
           </Row>
           <Row>
@@ -344,7 +447,7 @@ export default function Expeditions() {
           <Row>
             <Field label="Type de transport">
               <select style={inp} value={form.transport_type} onChange={e => setForm({ ...form, transport_type: e.target.value })}>
-                {Object.entries(TRANSPORT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label} (~{v.days}j)</option>)}
+                {Object.entries(TRANSPORT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label} (~{v.days}j · {v.ratePerKg}$/kg)</option>)}
               </select>
             </Field>
             <Field label="Transporteur">
@@ -354,20 +457,33 @@ export default function Expeditions() {
             </Field>
           </Row>
           <Row>
-            <Field label="Numéro de suivi"><input style={{ ...inp, fontFamily: 'monospace' }} value={form.tracking_number} placeholder="CMAU1234567" onChange={e => setForm({ ...form, tracking_number: e.target.value })} /></Field>
-            <Field label="Coût transport (€)"><input style={inp} type="number" min="0" step="0.01" value={form.transport_cost} onChange={e => setForm({ ...form, transport_cost: e.target.value })} /></Field>
+            <Field label="Poids total (kg)"><input style={inp} type="number" min="0" step="0.1" value={form.weight_kg} placeholder="ex: 850" onChange={e => setForm({ ...form, weight_kg: e.target.value })} /></Field>
+            <Field label="Coût transport (€)">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...inp, flex: 1 }} type="number" min="0" step="0.01" value={form.transport_cost} onChange={e => setForm({ ...form, transport_cost: e.target.value })} />
+                <button type="button" onClick={applyEstimatedCost} title="Estimer depuis le poids × tarif" style={miniBtn}>≈ poids</button>
+              </div>
+            </Field>
           </Row>
-          <Field label="Statut">
-            <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-              {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
-            </select>
-          </Field>
+          <Row>
+            <Field label="Numéro de suivi"><input style={{ ...inp, fontFamily: 'monospace' }} value={form.tracking_number} placeholder="CMAU1234567" onChange={e => setForm({ ...form, tracking_number: e.target.value })} /></Field>
+            <Field label="Statut">
+              <select style={inp} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+                {STATUS_FLOW.map(k => <option key={k} value={k}>{STATUS[k].icon} {STATUS[k].label}</option>)}
+              </select>
+            </Field>
+          </Row>
           <Row>
             <Field label="Date commande"><input style={inp} type="date" value={form.order_date} onChange={e => setForm({ ...form, order_date: e.target.value })} /></Field>
             <Field label="Date départ"><input style={inp} type="date" value={form.departure_date} onChange={e => setForm({ ...form, departure_date: e.target.value })} /></Field>
           </Row>
           <Row>
-            <Field label="Arrivée estimée"><input style={inp} type="date" value={form.eta} onChange={e => setForm({ ...form, eta: e.target.value })} /></Field>
+            <Field label="Arrivée estimée (ETA)">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...inp, flex: 1 }} type="date" value={form.eta} onChange={e => setForm({ ...form, eta: e.target.value })} />
+                <button type="button" onClick={applyAutoEta} title="Départ + délai du transport" style={miniBtn}>Auto</button>
+              </div>
+            </Field>
             <Field label="Arrivée réelle"><input style={inp} type="date" value={form.actual_arrival} onChange={e => setForm({ ...form, actual_arrival: e.target.value })} /></Field>
           </Row>
           <Field label="Notes"><textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
@@ -381,6 +497,8 @@ export default function Expeditions() {
 }
 
 const iconBtn = { width: 30, height: 30, borderRadius: 8, border: '1px solid #e8e8e3', background: '#fff', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }
+const ghostBtn = { padding: '9px 14px', background: '#fff', color: colors.textMuted, border: `1px solid ${colors.border}`, borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: 'pointer' }
+const miniBtn = { padding: '0 12px', background: '#eef2ff', color: colors.primary, border: `1px solid ${colors.primary}30`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }
 
 function Row({ children }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 12 }}>{children}</div>

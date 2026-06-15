@@ -19,6 +19,10 @@ ALTER TABLE shipments ADD COLUMN IF NOT EXISTS departure_date  DATE;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS actual_arrival  DATE;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS notes           TEXT;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS archived        BOOLEAN DEFAULT FALSE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS asin            VARCHAR(20);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS weight_kg       DECIMAL(10,2);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS product_id      UUID REFERENCES products(id) ON DELETE SET NULL;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS supplier_id     UUID REFERENCES suppliers(id) ON DELETE SET NULL;
 
 -- Le statut accepte désormais le workflow complet :
 -- draft, ordered, production, ready, shipped, transit, customs, warehouse, fba, closed

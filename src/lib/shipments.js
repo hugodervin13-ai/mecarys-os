@@ -10,14 +10,20 @@
 // Aucune donnée fictive n'est réinjectée automatiquement.
 
 // ---------- Types de transport ----------
-// Chaque type : icône, couleur, délai estimatif (jours, porte-à-porte indicatif).
+// Chaque type : icône, couleur, délai estimatif (jours), tarif au kg ($/kg).
+// Tarifs fournis : bateau 1.44 $/kg, camion 2.34 $/kg.
+// Les autres (avion/train/express) sont des estimations marché modifiables.
 export const TRANSPORT_TYPES = {
-  avion:   { label: 'Avion',   icon: '✈️', color: '#3b82f6', days: 7 },
-  bateau:  { label: 'Bateau',  icon: '🚢', color: '#0ea5e9', days: 35 },
-  camion:  { label: 'Camion',  icon: '🚚', color: '#f59e0b', days: 10 },
-  train:   { label: 'Train',   icon: '🚆', color: '#8b5cf6', days: 20 },
-  express: { label: 'Express', icon: '⚡', color: '#ef4444', days: 4 },
+  avion:   { label: 'Avion',   icon: '✈️', color: '#3b82f6', days: 7,  ratePerKg: 5.50 },
+  bateau:  { label: 'Bateau',  icon: '🚢', color: '#0ea5e9', days: 35, ratePerKg: 1.44 },
+  camion:  { label: 'Camion',  icon: '🚚', color: '#f59e0b', days: 10, ratePerKg: 2.34 },
+  train:   { label: 'Train',   icon: '🚆', color: '#8b5cf6', days: 20, ratePerKg: 1.90 },
+  express: { label: 'Express', icon: '⚡', color: '#ef4444', days: 4,  ratePerKg: 8.00 },
 }
+
+// Taux de conversion indicatif USD → EUR (les tarifs au kg sont en $/kg,
+// l'app raisonne en €). Modifiable ici si besoin.
+export const USD_EUR = 0.92
 
 // ---------- Workflow de statuts (ordonné) ----------
 export const STATUS_FLOW = [
@@ -67,13 +73,31 @@ export function trackingUrl(carrier, tracking) {
 // ---------- Modèle ----------
 export function emptyShipment() {
   return {
-    reference: '', supplier: '', product: '', quantity: '',
-    country_from: '', country_to: '',
+    reference: '', supplier: '', supplier_id: null,
+    product: '', product_id: null, asin: '', quantity: '',
+    weight_kg: '', country_from: '', country_to: '',
     carrier: 'dhl', transport_type: 'bateau', tracking_number: '',
     transport_cost: '', status: 'draft',
     order_date: '', departure_date: '', eta: '', actual_arrival: '',
     notes: '', archived: false,
   }
+}
+
+// Estimation du coût de transport à partir du poids : poids(kg) × tarif($/kg) → €.
+export function estimateCostFromWeight(weightKg, transportType) {
+  const w = Number(weightKg) || 0
+  const tt = TRANSPORT_TYPES[transportType]
+  if (!w || !tt) return null
+  return +(w * tt.ratePerKg * USD_EUR).toFixed(2)
+}
+
+// Auto-ETA : date de départ + délai estimatif du type de transport.
+export function computeEta(departureDate, transportType) {
+  const tt = TRANSPORT_TYPES[transportType]
+  const d = toDate(departureDate)
+  if (!tt || !d) return null
+  d.setDate(d.getDate() + tt.days)
+  return d.toISOString().slice(0, 10)
 }
 
 // ---------- Calculs automatiques ----------
@@ -158,6 +182,86 @@ export function computeAllAlerts(shipments) {
   return shipments
     .flatMap(computeShipmentAlerts)
     .sort((a, b) => order[a.severity] - order[b.severity])
+}
+
+// ---------- Coût transport réel par produit / ASIN ----------
+// Moyenne pondérée du coût de transport €/unité, sur les expéditions liées
+// à un produit. Sert à alimenter shipping_cost dans le calcul de marge.
+export function shippingCostByProduct(shipments) {
+  const map = {}
+  for (const s of shipments) {
+    if (s.archived) continue
+    const key = s.product_id || s.product
+    if (!key) continue
+    const q = Number(s.quantity) || 0
+    const c = Number(s.transport_cost) || 0
+    if (!q || !c) continue
+    if (!map[key]) map[key] = { key, product: s.product, product_id: s.product_id || null, asin: s.asin || null, units: 0, cost: 0, count: 0 }
+    map[key].units += q
+    map[key].cost += c
+    map[key].count += 1
+  }
+  return Object.values(map)
+    .map(m => ({ ...m, unitCost: m.units ? m.cost / m.units : 0 }))
+    .sort((a, b) => b.cost - a.cost)
+}
+
+// ---------- Export CSV ----------
+export function shipmentsToCsv(shipments) {
+  const cols = [
+    ['reference', 'Référence'], ['supplier', 'Fournisseur'], ['product', 'Produit'],
+    ['asin', 'ASIN'], ['quantity', 'Quantité'], ['weight_kg', 'Poids (kg)'],
+    ['country_from', 'Départ'], ['country_to', 'Arrivée'],
+    ['transport_type', 'Transport'], ['carrier', 'Transporteur'],
+    ['tracking_number', 'Suivi'], ['status', 'Statut'],
+    ['transport_cost', 'Coût (€)'], ['order_date', 'Commande'],
+    ['departure_date', 'Départ'], ['eta', 'ETA'], ['actual_arrival', 'Arrivée réelle'],
+    ['notes', 'Notes'],
+  ]
+  const esc = (v) => {
+    const str = v == null ? '' : String(v)
+    return /[",;\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
+  }
+  const header = cols.map(c => c[1]).join(';')
+  const rows = shipments.map(s => cols.map(([k]) => {
+    if (k === 'transport_type') return TRANSPORT_TYPES[s[k]]?.label || s[k]
+    if (k === 'carrier') return CARRIERS[s[k]]?.name || s[k]
+    if (k === 'status') return STATUS[s[k]]?.label || s[k]
+    return esc(s[k])
+  }).join(';'))
+  return [header, ...rows].join('\n')
+}
+
+export function downloadCsv(shipments, filename = 'expeditions.csv') {
+  const csv = '﻿' + shipmentsToCsv(shipments) // BOM pour Excel/accents
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ---------- Notifications navigateur (alertes critiques) ----------
+export async function ensureNotificationPermission() {
+  if (typeof Notification === 'undefined') return false
+  if (Notification.permission === 'granted') return true
+  if (Notification.permission === 'denied') return false
+  const res = await Notification.requestPermission()
+  return res === 'granted'
+}
+
+// Notifie les nouvelles alertes critiques (dédoublonnées via localStorage).
+export function notifyCriticalAlerts(uid, alerts) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const critical = alerts.filter(a => a.severity === 'critical')
+  if (critical.length === 0) return
+  const key = `mecarys.notified.${uid || 'anon'}`
+  let seen = []
+  try { seen = JSON.parse(localStorage.getItem(key) || '[]') } catch { seen = [] }
+  const seenSet = new Set(seen)
+  const fresh = critical.filter(a => !seenSet.has(a.message))
+  fresh.forEach(a => { try { new Notification('🚨 MECARYS — Alerte expédition', { body: a.message }) } catch { /* ignore */ } })
+  try { localStorage.setItem(key, JSON.stringify(critical.map(a => a.message))) } catch { /* ignore */ }
 }
 
 // ---------- Persistance locale ----------
