@@ -1,483 +1,584 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getProducts, getAlerts } from '../lib/supabase'
+import {
+  getProducts, getAlerts, getOrders, getShipments,
+  getSuppliers, getDocuments, getAllCompetitors,
+} from '../lib/supabase'
 import { computeAlerts, SEVERITY } from '../lib/alertsEngine'
 import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
-import { formatNumber } from '../lib/utils'
-import { box } from '../lib/theme'
-import { DemoBadge } from '../components/ui'
-import KPICard from '../components/KPICard'
+import { formatNumber, formatCurrency, formatDate } from '../lib/utils'
+import { box, colors } from '../lib/theme'
+import { KpiCard } from '../components/ui'
 import Loading from '../components/Loading'
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from 'recharts'
 
-const DATA = {
-  sales: {
-    '7j': [
-      { date: 'Lun', v: 7200 }, { date: 'Mar', v: 9100 }, { date: 'Mer', v: 8400 },
-      { date: 'Jeu', v: 11200 }, { date: 'Ven', v: 13500 }, { date: 'Sam', v: 12100 }, { date: 'Dim', v: 10800 },
-    ],
-    '30j': [
-      { date: '7 avr.', v: 8200 }, { date: '14 avr.', v: 10500 },
-      { date: '21 avr.', v: 14200 }, { date: '28 avr.', v: 12800 },
-      { date: '5 mai', v: 28500 }, { date: '12 mai', v: 32000 },
-    ],
-    '90j': [
-      { date: 'Fév', v: 62000 }, { date: 'Mars', v: 95000 },
-      { date: 'Avr', v: 118000 }, { date: 'Mai', v: 141000 },
-      { date: 'Juin', v: 158000 }, { date: 'Juil', v: 174000 },
-    ],
-  },
-  profit: {
-    '7j': [
-      { date: 'Lun', v: 1800 }, { date: 'Mar', v: 2300 }, { date: 'Mer', v: 2100 },
-      { date: 'Jeu', v: 2800 }, { date: 'Ven', v: 3400 }, { date: 'Sam', v: 3100 }, { date: 'Dim', v: 2700 },
-    ],
-    '30j': [
-      { date: '7 avr.', v: 1800 }, { date: '14 avr.', v: 2800 },
-      { date: '21 avr.', v: 4100 }, { date: '28 avr.', v: 3200 },
-      { date: '5 mai', v: 6800 }, { date: '12 mai', v: 7500 },
-    ],
-    '90j': [
-      { date: 'Fév', v: 15600 }, { date: 'Mars', v: 23800 },
-      { date: 'Avr', v: 29700 }, { date: 'Mai', v: 35300 },
-      { date: 'Juin', v: 39700 }, { date: 'Juil', v: 43600 },
-    ],
-  },
-}
-
-const KPI_BY_PERIOD = {
-  '7j':  { ca: '72 300 €', profit: '18 200 €', units: '82', acos: '27,1%', caChange: 8.4, profitChange: 6.2, unitsChange: 5.1, acosChange: -1.2 },
-  '30j': { ca: '386 730 €', profit: '97 430 €', units: '356', acos: '24,6%', caChange: 22.8, profitChange: 16.7, unitsChange: 12.2, acosChange: -3.1 },
-  '90j': { ca: '748 000 €', profit: '187 400 €', units: '1 240', acos: '22,3%', caChange: 31.5, profitChange: 24.1, unitsChange: 18.6, acosChange: -5.4 },
-}
-
-const PERIOD_LABELS = { '7j': '7 derniers jours', '30j': '30 derniers jours', '90j': '90 derniers jours' }
-
-const tracked = [
-  { asin: 'B08N5WRWNW', price: '27,99', chg: -0.50, rating: 4.3, rev: 1256 },
-  { asin: 'B09X1ZZKZL', price: '29,90', chg: 1.20, rating: 4.1, rev: 842 },
-  { asin: 'B0C1234567', price: '25,50', chg: -0.20, rating: 4.0, rev: 532 },
+// ─── Pipeline stages (mapped to real shipment statuses from Expeditions.jsx) ───
+const PIPELINE_STAGES = [
+  { key: 'production', label: 'Production', icon: '🏭', color: '#6366f1', bg: '#6366f110' },
+  { key: 'transit',    label: 'En transit', icon: '🚢', color: '#3b82f6', bg: '#3b82f610' },
+  { key: 'customs',    label: 'Douane',     icon: '🛃', color: '#f59e0b', bg: '#f59e0b10' },
+  { key: 'warehouse',  label: 'Entrepôt',   icon: '🏬', color: '#8b5cf6', bg: '#8b5cf610' },
+  { key: 'fba',        label: 'Amazon FBA', icon: '📦', color: '#10b981', bg: '#10b98110' },
 ]
 
-const ALERT_LINKS = { stock: '/stock', marge: '/produits', acos: '/produits', avis: '/qualite-sav' }
+// Statuses considered "active" for orders and shipments
+const ACTIVE_ORDER_STATUSES = ['pending', 'production', 'shipped', 'transit_boat', 'transit_truck', 'transit', 'customs']
+const ACTIVE_SHIPMENT_STATUSES = ['production', 'transit', 'customs', 'warehouse']
+const IN_TRANSIT_STATUSES = ['transit', 'customs', 'warehouse']
 
-const pipe = [
-  { label: 'Production', n: 3, color: '#6366f1', bg: '#6366f110', icon: '🏭' },
-  { label: 'En transit', n: 2, color: '#3b82f6', bg: '#3b82f610', icon: '🚢' },
-  { label: 'Douane', n: 1, color: '#ef4444', bg: '#ef444410', icon: '🛃' },
-  { label: 'En entrepôt', n: 1, color: '#f59e0b', bg: '#f59e0b10', icon: '📦' },
-  { label: 'Amazon FBA', n: 2, color: '#10b981', bg: '#10b98110', icon: '📦' },
+// ─── Shortcuts ───
+const SHORTCUTS = [
+  { label: 'Ajouter un produit',     icon: '📦', to: '/produits',     color: '#6366f1' },
+  { label: 'Ajouter un fournisseur', icon: '🏭', to: '/fournisseurs', color: '#8b5cf6' },
+  { label: 'Créer une commande',     icon: '📋', to: '/commandes',    color: '#3b82f6' },
+  { label: 'Créer une expédition',   icon: '🚢', to: '/expeditions',  color: '#0ea5e9' },
+  { label: 'Ajouter un document',    icon: '📄', to: '/documents',    color: '#f59e0b' },
+  { label: 'Analyse IA produit',     icon: '🤖', to: '/analyse-ia',   color: '#ec4899' },
+  { label: 'Voir le stock',          icon: '📊', to: '/stock',        color: '#10b981' },
+  { label: 'Ruptures de stock',      icon: '⚠️', to: '/stock',        color: '#ef4444' },
+  { label: 'Voir les expéditions',   icon: '✈️', to: '/expeditions',  color: '#0ea5e9' },
+  { label: 'Voir les fournisseurs',  icon: '🤝', to: '/fournisseurs', color: '#8b5cf6' },
 ]
 
-const MOCK_ANALYSIS = {
-  'B08N5WRWNW': { score: 87, title: 'Kit ampoules H7 LED', price: '27,99 €', rating: '4.3/5', reviews: '1 256', bsr: '#342 Auto', opportunities: ['Optimiser le titre avec mots-clés longue traîne', 'Ajouter vidéo produit pour augmenter conversion', 'Améliorer les 2 premières bullet points'], risks: ['Concurrents agressifs sur le prix', 'Marché saisonnier (hiver)'] },
-  'B09X1ZZKZL': { score: 72, title: 'Filtre à huile universel', price: '29,90 €', rating: '4.1/5', reviews: '842', bsr: '#891 Auto', opportunities: ['Images de qualité à améliorer', 'Cibler les mots-clés "compatible BMW"'], risks: ['Stock limité chez fournisseur', 'Prix instable'] },
+// ─── localStorage Notes ───
+function loadNotes() {
+  try { return JSON.parse(localStorage.getItem('mecarys_notes') || '[]') } catch { return [] }
+}
+function persistNotes(notes) {
+  try { localStorage.setItem('mecarys_notes', JSON.stringify(notes)) } catch {}
 }
 
-const ttp = { backgroundColor: '#fff', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 12, padding: '8px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }
-const selStyle = { background: '#fafaf8', border: '1px solid #e8e8e3', color: '#6b7280', fontSize: 11, borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }
+// ─── Extract first name from email ───
+function firstName(email) {
+  if (!email) return 'vous'
+  const raw = email.split('@')[0].split('.')[0].replace(/[^a-zA-ZÀ-ÿ]/g, '')
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
+}
 
+// ─── Editable note field ───
+function EditNoteField({ initialText, onSave, onCancel }) {
+  const [val, setVal] = useState(initialText)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <textarea
+        autoFocus
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSave(val) } if (e.key === 'Escape') onCancel() }}
+        style={{ width: '100%', minHeight: 56, padding: '6px 8px', background: '#fff', border: '1px solid #6366f150', borderRadius: 6, fontSize: 12, color: colors.text, resize: 'vertical', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+      />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onSave(val)} style={{ flex: 1, padding: '5px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Sauvegarder</button>
+        <button onClick={onCancel} style={{ padding: '5px 10px', background: '#f0f0eb', color: colors.textMuted, border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Annuler</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Dashboard ───
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { user, setProducts, setAlerts: setStoreAlerts } = useStore()
-  const [kpiPeriod, setKpiPeriod] = useState('30j')
-  const [salesPeriod, setSalesPeriod] = useState('30j')
-  const [profitPeriod, setProfitPeriod] = useState('30j')
-  const [asinInput, setAsinInput] = useState('')
-  const [analysisResult, setAnalysisResult] = useState(null)
-  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const { user, setProducts, setAlerts: setStoreAlerts, setOrders } = useStore()
 
-  const { data: productsData, loading: productsLoading } = useData('products', () => getProducts(user.id), [user])
-  const { data: alertsData, loading: alertsLoading } = useData('alerts', () => getAlerts(user.id), [user])
-  const products = productsData || []
-  const loading = productsLoading || alertsLoading
+  // ── Data hooks — all from real Supabase tables ──
+  const { data: productsData, loading: loadingP } = useData('products',     () => getProducts(user.id),        [user])
+  const { data: ordersData,   loading: loadingO } = useData('orders',       () => getOrders(user.id),          [user])
+  const { data: shipmentsData,loading: loadingS } = useData('shipments',    () => getShipments(user.id),       [user])
+  const { data: suppliersData,loading: loadingSu } = useData('suppliers',   () => getSuppliers(user.id),       [user])
+  const { data: documentsData,loading: loadingD } = useData('documents',    () => getDocuments(user.id),       [user])
+  const { data: competitorsData }                  = useData('competitors',  () => getAllCompetitors(user.id),  [user])
+  const { data: alertsDbData }                     = useData('db-alerts',    () => getAlerts(user.id),         [user])
 
-  useEffect(() => { if (productsData) setProducts(productsData) }, [productsData, setProducts])
-  useEffect(() => { if (alertsData) setStoreAlerts(alertsData) }, [alertsData, setStoreAlerts])
+  const loading = loadingP || loadingO || loadingS || loadingSu || loadingD
 
-  const stock = products.reduce((a, p) => a + (p.stock_fba || 0), 0) || 4782
-  const kpi = KPI_BY_PERIOD[kpiPeriod]
+  // ── Sync to global store so other components stay in sync ──
+  useEffect(() => { if (productsData) setProducts(productsData) },   [productsData, setProducts])
+  useEffect(() => { if (alertsDbData) setStoreAlerts(alertsDbData) }, [alertsDbData, setStoreAlerts])
+  useEffect(() => { if (ordersData)   setOrders(ordersData) },        [ordersData, setOrders])
 
-  const realAlerts = computeAlerts(products || [])
-  const severityCounts = realAlerts.reduce((acc, a) => { acc[a.severity] = (acc[a.severity] || 0) + 1; return acc }, {})
-  const dbAlerts = alertsData || []
+  // ── Normalize arrays (never null) ──
+  const products    = productsData   || []
+  const orders      = ordersData     || []
+  const shipments   = shipmentsData  || []
+  const suppliers   = suppliersData  || []
+  const documents   = documentsData  || []
+  const competitors = competitorsData || []
 
-  const alertsList = realAlerts.length > 0
-    ? realAlerts.slice(0, 5).map((a, i) => ({
-        id: i,
-        icon: SEVERITY[a.severity]?.icon || '🔵',
-        msg: a.message,
-        link: ALERT_LINKS[a.type] || '/produits',
-      }))
-    : dbAlerts.slice(0, 5).map((a, i) => ({
-        id: a.id || i,
-        icon: a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟠' : '🔵',
-        msg: a.message || 'Alerte',
-        link: ALERT_LINKS[a.type] || '/produits',
-      }))
+  // ── KPI calculations ──
+  const activeOrders    = orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status))
+  const activeShipments = shipments.filter(s => ACTIVE_SHIPMENT_STATUSES.includes(s.status))
+  const unitsInTransit  = shipments
+    .filter(s => IN_TRANSIT_STATUSES.includes(s.status))
+    .reduce((a, s) => a + (Number(s.items) || 0), 0)
+  const stockValue = products.reduce((a, p) => a + (Number(p.stock_fba) || 0) * (Number(p.cost) || 0), 0)
 
-  const handleAnalyse = async () => {
-    if (!asinInput.trim()) return
-    setAnalysisLoading(true)
-    setAnalysisResult(null)
-    await new Promise(r => setTimeout(r, 1200))
-    const result = MOCK_ANALYSIS[asinInput.trim().toUpperCase()] || {
-      score: Math.floor(Math.random() * 30) + 55,
-      title: `Produit ASIN ${asinInput.trim()}`,
-      price: 'N/A',
-      rating: 'N/A',
-      reviews: 'N/A',
-      bsr: 'N/A',
-      opportunities: ['Données en cours de collecte...'],
-      risks: ['Analyse complète disponible sous 24h'],
+  // ── Real alerts from products ──
+  const productAlerts = computeAlerts(products)
+  const criticalStock = productAlerts.filter(a => a.type === 'stock' && a.severity === 'critical').length
+
+  // ── Extra smart alerts from other modules ──
+  const today = new Date().toISOString().split('T')[0]
+  const customsBlocked = shipments.filter(s => s.status === 'customs')
+  const lateOrders = orders.filter(o =>
+    o.expected_delivery && o.expected_delivery < today &&
+    !['delivered', 'cancelled'].includes(o.status)
+  )
+
+  const allAlerts = [
+    ...productAlerts,
+    ...customsBlocked.map(s => ({
+      severity: 'warning',
+      type: 'customs',
+      message: `Expédition ${s.reference || s.id} bloquée en douane — vérifiez votre transitaire`,
+    })),
+    ...lateOrders.map(o => ({
+      severity: 'warning',
+      type: 'order_late',
+      message: `Commande ${o.order_number || o.id} en retard (ETA: ${o.expected_delivery})`,
+    })),
+  ]
+  const sortOrder = { critical: 0, warning: 1, info: 2 }
+  const sortedAlerts = allAlerts
+    .sort((a, b) => (sortOrder[a.severity] ?? 1) - (sortOrder[b.severity] ?? 1))
+    .slice(0, 10)
+
+  // ── Pipeline from real shipments ──
+  const pipeline = PIPELINE_STAGES.map(stage => {
+    const matched = shipments.filter(s =>
+      stage.key === 'fba'
+        ? s.status === 'fba' || s.status === 'delivered'
+        : s.status === stage.key
+    )
+    return {
+      ...stage,
+      count: matched.length,
+      items: matched.reduce((a, s) => a + (Number(s.items) || 0), 0),
     }
-    setAnalysisResult(result)
-    setAnalysisLoading(false)
+  })
+
+  // ── Recent competitors (real) ──
+  const recentCompetitors = competitors.slice(0, 4)
+
+  // ── Notes (localStorage) ──
+  const [notes, setNotes]         = useState(loadNotes)
+  const [noteText, setNoteText]   = useState('')
+  const [editingNote, setEditingNote] = useState(null)
+
+  const addNote = () => {
+    if (!noteText.trim()) return
+    const updated = [
+      { id: Date.now(), text: noteText.trim(), pinned: false, createdAt: new Date().toISOString() },
+      ...notes,
+    ]
+    setNotes(updated)
+    persistNotes(updated)
+    setNoteText('')
   }
+
+  const deleteNote = id => {
+    const updated = notes.filter(n => n.id !== id)
+    setNotes(updated)
+    persistNotes(updated)
+  }
+
+  const togglePin = id => {
+    const updated = notes.map(n => n.id === id ? { ...n, pinned: !n.pinned } : n)
+    setNotes(updated)
+    persistNotes(updated)
+  }
+
+  const saveEdit = (id, text) => {
+    if (!text.trim()) return
+    const updated = notes.map(n => n.id === id ? { ...n, text: text.trim() } : n)
+    setNotes(updated)
+    persistNotes(updated)
+    setEditingNote(null)
+  }
+
+  const sortedNotes = [...notes].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
+
+  // ── Greeting ──
+  const hour = new Date().getHours()
+  const greet = hour < 12 ? 'Bonjour' : hour < 18 ? 'Bon après-midi' : 'Bonsoir'
+  const name  = firstName(user?.email)
 
   if (loading) return <Loading />
 
   return (
-    <div>
-      {/* Title + period */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ══════════════ HEADER ══════════════ */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Bonjour Hugo 👋</h1>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>Voici la performance de votre activité Amazon.</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: colors.text, margin: 0 }}>
+            {greet}, {name} 👋
+          </h1>
+          <p style={{ fontSize: 13, color: colors.textFaint, marginTop: 4, margin: 0 }}>
+            {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {products.length > 0 && ` · ${products.length} produit${products.length > 1 ? 's' : ''} dans votre catalogue`}
+          </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #e8e8e3', borderRadius: 10, padding: '6px 10px' }}>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>Période KPI :</span>
-          {['7j', '30j', '90j'].map(p => (
-            <button
-              key={p}
-              onClick={() => setKpiPeriod(p)}
-              style={{
-                padding: '5px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                background: kpiPeriod === p ? '#6366f1' : 'transparent',
-                color: kpiPeriod === p ? '#fff' : '#6b7280',
-                transition: 'all 0.15s',
-              }}
-            >{p}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 22 }}>
-        <KPICard title={`Chiffre d'affaires (${kpiPeriod})`} value={kpi.ca} change={kpi.caChange} icon="💰" color="#f59e0b" />
-        <KPICard title={`Profit net (${kpiPeriod})`} value={kpi.profit} change={kpi.profitChange} icon="📊" color="#10b981" />
-        <KPICard title={`Unités vendues (${kpiPeriod})`} value={kpi.units} change={kpi.unitsChange} icon="📦" color="#3b82f6" />
-        <KPICard title="ACOS" value={kpi.acos} change={kpi.acosChange} icon="🎯" color="#ef4444" />
-        <KPICard title="Stock total FBA" value={formatNumber(stock)} change={3.1} icon="🏭" color="#6366f1" />
-      </div>
-
-      {/* Charts + Right */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px', gap: 14, marginBottom: 22 }}>
-        {/* Sales Chart */}
-        <div style={{ ...box, padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-            <div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>Ventes </span>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>({PERIOD_LABELS[salesPeriod]})</span>
-              {' '}<DemoBadge />
-            </div>
-            <select
-              value={salesPeriod}
-              onChange={e => setSalesPeriod(e.target.value)}
-              style={selStyle}
-            >
-              <option value="7j">7 jours</option>
-              <option value="30j">30 jours</option>
-              <option value="90j">90 jours</option>
-            </select>
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a2e' }}>{KPI_BY_PERIOD[salesPeriod].ca}</div>
-          <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 14 }}>↑ {KPI_BY_PERIOD[salesPeriod].caChange}%</div>
-          <ResponsiveContainer width="100%" height={170}>
-            <AreaChart data={DATA.sales[salesPeriod]} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-              <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity={0.2}/><stop offset="100%" stopColor="#6366f1" stopOpacity={0}/></linearGradient></defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" vertical={false}/>
-              <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false}/>
-              <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={v=>`${(v/1000).toFixed(0)}k`}/>
-              <Tooltip contentStyle={ttp}/>
-              <Area type="monotone" dataKey="v" stroke="#6366f1" fill="url(#sg)" strokeWidth={2.5} dot={false} name="Ventes"/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Profit Chart */}
-        <div style={{ ...box, padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-            <div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>Profit net </span>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>({PERIOD_LABELS[profitPeriod]})</span>
-              {' '}<DemoBadge />
-            </div>
-            <select
-              value={profitPeriod}
-              onChange={e => setProfitPeriod(e.target.value)}
-              style={selStyle}
-            >
-              <option value="7j">7 jours</option>
-              <option value="30j">30 jours</option>
-              <option value="90j">90 jours</option>
-            </select>
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a2e' }}>{KPI_BY_PERIOD[profitPeriod].profit}</div>
-          <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 14 }}>↑ {KPI_BY_PERIOD[profitPeriod].profitChange}%</div>
-          <ResponsiveContainer width="100%" height={170}>
-            <AreaChart data={DATA.profit[profitPeriod]} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-              <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.2}/><stop offset="100%" stopColor="#10b981" stopOpacity={0}/></linearGradient></defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" vertical={false}/>
-              <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false}/>
-              <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={v=>`${(v/1000).toFixed(0)}k`}/>
-              <Tooltip contentStyle={ttp}/>
-              <Area type="monotone" dataKey="v" stroke="#10b981" fill="url(#pg)" strokeWidth={2.5} dot={false} name="Profit"/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Right panel */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Competitors */}
-          <div style={{ ...box, padding: 16, flex: 1 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>Suivi concurrents</span>
-              <button
-                onClick={() => navigate('/concurrents')}
-                style={{ fontSize: 11, background: '#6366f110', color: '#6366f1', padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontWeight: 600 }}
-              >+ Ajouter</button>
-            </div>
-            {tracked.map(p => (
-              <div key={p.asin} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #f0f0eb' }}>
-                <div style={{ width: 34, height: 34, background: '#f5f5f0', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>📦</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a2e' }}>{p.asin}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span style={{ fontSize: 12, color: '#374151' }}>{p.price} €</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: p.chg >= 0 ? '#10b981' : '#ef4444' }}>
-                      {p.chg >= 0 ? '↑' : '↓'} {Math.abs(p.chg).toFixed(2)} €
-                    </span>
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 12, color: '#374151' }}><span style={{ color: '#f59e0b' }}>★</span> {p.rating}</div>
-                  <div style={{ fontSize: 10, color: '#9ca3af' }}>({formatNumber(p.rev)})</div>
-                </div>
-              </div>
-            ))}
-            <div style={{ marginTop: 10, textAlign: 'right' }}>
-              <span
-                onClick={() => navigate('/concurrents')}
-                style={{ fontSize: 12, color: '#6366f1', cursor: 'pointer', fontWeight: 500 }}
-              >Voir tous les suivis →</span>
-            </div>
-          </div>
-
-          {/* Alerts */}
-          <div style={{ ...box, padding: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 14 }}>🚨</span> Alertes
-            </div>
-            {alertsList.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                <span style={{ fontSize: 20 }}>✅</span>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Aucune alerte</div>
-              </div>
-            ) : alertsList.map(a => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
-                  <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{a.icon}</span>
-                  <span style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{a.msg}</span>
-                </div>
-                <span
-                  onClick={() => navigate(a.link)}
-                  style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
-                >Voir</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Feature cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
-        {/* ASIN Analysis */}
-        <div style={{ ...box, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Analyse IA d'un ASIN</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Collez un ASIN et obtenez une analyse complète + recommandations.</p>
-          <input
-            placeholder="Ex: B08N5WRWNW"
-            value={asinInput}
-            onChange={e => { setAsinInput(e.target.value); setAnalysisResult(null) }}
-            onKeyDown={e => e.key === 'Enter' && handleAnalyse()}
-            style={{ width: '100%', padding: '8px 12px', background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 12, marginBottom: 10, boxSizing: 'border-box' }}
-          />
+        <div style={{ display: 'flex', gap: 10 }}>
           <button
-            onClick={handleAnalyse}
-            disabled={analysisLoading || !asinInput.trim()}
-            style={{ width: '100%', padding: '10px 0', background: analysisLoading || !asinInput.trim() ? '#a5b4fc' : '#8b5cf6', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: analysisLoading || !asinInput.trim() ? 'default' : 'pointer', transition: 'background 0.15s' }}
-          >{analysisLoading ? '⏳ Analyse en cours...' : '✨ Analyser'}</button>
-          {analysisResult && (
-            <div style={{ marginTop: 12, background: '#fafaf8', borderRadius: 10, padding: 12, fontSize: 11 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontWeight: 600, color: '#1a1a2e' }}>{analysisResult.title}</span>
-                <span style={{ background: analysisResult.score >= 80 ? '#10b98120' : analysisResult.score >= 65 ? '#f59e0b20' : '#ef444420', color: analysisResult.score >= 80 ? '#10b981' : analysisResult.score >= 65 ? '#f59e0b' : '#ef4444', fontWeight: 700, padding: '2px 8px', borderRadius: 20 }}>{analysisResult.score}/100</span>
+            onClick={() => navigate('/expeditions')}
+            style={{ padding: '9px 18px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          >+ Expédition</button>
+          <button
+            onClick={() => navigate('/produits')}
+            style={{ padding: '9px 18px', background: '#fff', color: colors.primary, border: `1px solid ${colors.primary}20`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          >+ Produit</button>
+        </div>
+      </div>
+
+      {/* ══════════════ KPI ROW 1 ══════════════ */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        <ClickableKPI onClick={() => navigate('/produits')}>
+          <KpiCard label="Produits" value={products.length} icon="📦" color={colors.primary} sub={products.length === 0 ? 'Ajoutez votre premier produit' : 'dans votre catalogue'} />
+        </ClickableKPI>
+        <ClickableKPI onClick={() => navigate('/fournisseurs')}>
+          <KpiCard label="Fournisseurs" value={suppliers.length} icon="🏭" color="#8b5cf6" sub={suppliers.length === 0 ? 'Aucun fournisseur' : 'partenaires référencés'} />
+        </ClickableKPI>
+        <ClickableKPI onClick={() => navigate('/expeditions')}>
+          <KpiCard label="Expéditions actives" value={activeShipments.length} icon="🚢" color="#3b82f6" sub={activeShipments.length === 0 ? 'Aucune en cours' : 'en route vers FBA'} />
+        </ClickableKPI>
+        <ClickableKPI onClick={() => navigate('/commandes')}>
+          <KpiCard label="Commandes actives" value={activeOrders.length} icon="📋" color="#0ea5e9" sub={activeOrders.length === 0 ? 'Aucune en cours' : 'en traitement fournisseur'} />
+        </ClickableKPI>
+      </div>
+
+      {/* ══════════════ KPI ROW 2 ══════════════ */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        <KpiCard label="Unités en transit" value={formatNumber(unitsInTransit)} icon="✈️" color="#f59e0b" sub={unitsInTransit === 0 ? 'Aucune unité en route' : 'vers vos entrepôts'} />
+        <ClickableKPI onClick={() => navigate('/stock')}>
+          <KpiCard
+            label="Ruptures critiques"
+            value={criticalStock}
+            icon="⚠️"
+            color={criticalStock > 0 ? '#ef4444' : '#10b981'}
+            sub={criticalStock > 0 ? 'action immédiate requise' : 'aucune rupture imminente'}
+          />
+        </ClickableKPI>
+        <KpiCard label="Valeur du stock" value={stockValue > 0 ? formatCurrency(stockValue) : '—'} icon="💰" color="#10b981" sub={stockValue > 0 ? 'au prix de revient' : 'renseignez vos coûts'} />
+        <ClickableKPI onClick={() => navigate('/documents')}>
+          <KpiCard label="Documents" value={documents.length} icon="📄" color="#6b7280" sub={documents.length === 0 ? 'Aucun document' : 'enregistrés'} />
+        </ClickableKPI>
+      </div>
+
+      {/* ══════════════ PIPELINE + ALERTES ══════════════ */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 14 }}>
+
+        {/* Pipeline logistique — 100% dynamique depuis shipments */}
+        <div style={{ ...box, padding: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>Pipeline logistique</div>
+              <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>
+                {shipments.length === 0
+                  ? 'Aucune expédition — créez-en une pour démarrer'
+                  : `${shipments.length} expédition${shipments.length > 1 ? 's' : ''} · ${formatNumber(shipments.reduce((a, s) => a + (Number(s.items) || 0), 0))} unités total`}
               </div>
-              <div style={{ color: '#6b7280', marginBottom: 6 }}>Prix: {analysisResult.price} · Note: {analysisResult.rating} · {analysisResult.reviews} avis</div>
-              <div style={{ color: '#6b7280', marginBottom: 8 }}>BSR: {analysisResult.bsr}</div>
-              <div style={{ fontWeight: 600, color: '#10b981', marginBottom: 4 }}>✓ Opportunités :</div>
-              {analysisResult.opportunities.map((o, i) => <div key={i} style={{ color: '#6b7280', marginBottom: 3 }}>• {o}</div>)}
-              <div style={{ fontWeight: 600, color: '#ef4444', margin: '8px 0 4px' }}>⚠ Risques :</div>
-              {analysisResult.risks.map((r, i) => <div key={i} style={{ color: '#6b7280', marginBottom: 3 }}>• {r}</div>)}
+            </div>
+            <button
+              onClick={() => navigate('/expeditions')}
+              style={{ fontSize: 12, color: colors.primary, background: '#6366f110', padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            >Gérer les expéditions →</button>
+          </div>
+
+          {shipments.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '28px 0', color: colors.textFaint }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>🚢</div>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Aucune expédition en cours</div>
+              <div style={{ fontSize: 12, marginBottom: 16 }}>Créez une expédition pour suivre votre pipeline fournisseur → Amazon FBA</div>
               <button
-                onClick={() => navigate('/analyse-ia')}
-                style={{ marginTop: 8, width: '100%', padding: '7px 0', background: '#6366f110', color: '#6366f1', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-              >Analyse complète →</button>
+                onClick={() => navigate('/expeditions')}
+                style={{ padding: '9px 20px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >+ Créer une expédition</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
+              {pipeline.map((stage, i) => (
+                <div key={stage.key} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                  <button
+                    onClick={() => navigate('/expeditions')}
+                    title={`${stage.label} : ${stage.count} expédition${stage.count > 1 ? 's' : ''}`}
+                    style={{
+                      flex: 1, background: stage.count > 0 ? stage.bg : '#fafaf8',
+                      border: `1px solid ${stage.count > 0 ? stage.color + '35' : '#e8e8e3'}`,
+                      borderRadius: 12, padding: '16px 8px', cursor: 'pointer',
+                      textAlign: 'center', transition: 'all 0.15s', outline: 'none',
+                      opacity: stage.count === 0 ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => stage.count > 0 && (e.currentTarget.style.transform = 'translateY(-2px)')}
+                    onMouseLeave={e => (e.currentTarget.style.transform = 'none')}
+                  >
+                    <div style={{ fontSize: 22, marginBottom: 6 }}>{stage.icon}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: stage.count > 0 ? stage.color : colors.textFaint, marginBottom: 4 }}>
+                      {stage.label}
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: stage.count > 0 ? stage.color : colors.textFaint, lineHeight: 1 }}>
+                      {stage.count}
+                    </div>
+                    {stage.items > 0 && (
+                      <div style={{ fontSize: 10, color: colors.textFaint, marginTop: 4 }}>
+                        {formatNumber(stage.items)} unités
+                      </div>
+                    )}
+                  </button>
+                  {i < pipeline.length - 1 && (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2.5" style={{ flexShrink: 0, margin: '0 4px' }}>
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
 
-        <div
-          onClick={() => navigate('/concurrents')}
-          style={{ ...box, padding: 18, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Suivi concurrentiel</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Suivez vos concurrents : prix, avis, stock, évolution quotidienne.</p>
-          <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>📊</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
-        </div>
+        {/* Alertes intelligentes */}
+        <div style={{ ...box, padding: 18, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>🚨 Alertes</div>
+            {sortedAlerts.length > 0 && (
+              <span style={{
+                fontSize: 11, background: sortedAlerts.some(a => a.severity === 'critical') ? '#ef444415' : '#f59e0b15',
+                color: sortedAlerts.some(a => a.severity === 'critical') ? '#ef4444' : '#f59e0b',
+                padding: '3px 8px', borderRadius: 20, fontWeight: 700,
+              }}>
+                {sortedAlerts.length}
+              </span>
+            )}
+          </div>
 
-        <div
-          onClick={() => navigate('/produits')}
-          style={{ ...box, padding: 18, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Amélioration de listing</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Obtenez des idées pour améliorer votre fiche produit et booster vos ventes.</p>
-          <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>📝</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
-        </div>
-
-        <div
-          onClick={() => navigate('/analyse-ia')}
-          style={{ ...box, padding: 18, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>Idées produit</div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14, lineHeight: 1.6 }}>Trouvez des idées de produits rentables avec notre IA.</p>
-          <div style={{ height: 56, background: '#fafaf8', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>💡</div>
-          <div style={{ marginTop: 10, textAlign: 'center', fontSize: 11, color: '#6366f1', fontWeight: 600 }}>Accéder →</div>
+          {sortedAlerts.length === 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Tout va bien</div>
+              <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 4, textAlign: 'center' }}>Aucune alerte active</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
+              {sortedAlerts.map((a, i) => {
+                const isCritical = a.severity === 'critical'
+                const isWarning  = a.severity === 'warning'
+                return (
+                  <div
+                    key={i}
+                    onClick={() => navigate(a.type === 'stock' ? '/stock' : a.type === 'marge' || a.type === 'acos' ? '/produits' : a.type === 'customs' ? '/expeditions' : a.type === 'order_late' ? '/commandes' : '/produits')}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                      padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                      background: isCritical ? '#ef444408' : isWarning ? '#f59e0b08' : '#3b82f608',
+                      border: `1px solid ${isCritical ? '#ef444422' : isWarning ? '#f59e0b22' : '#3b82f622'}`,
+                      transition: 'opacity 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                  >
+                    <span style={{ fontSize: 12, flexShrink: 0 }}>
+                      {SEVERITY[a.severity]?.icon || (isCritical ? '🔴' : isWarning ? '🟠' : '🔵')}
+                    </span>
+                    <span style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.5, flex: 1 }}>{a.message}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Pipeline + Shortcuts */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, marginBottom: 22 }}>
-        <div style={{ ...box, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 16 }}>Pipeline réapprovisionnement</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {pipe.map((s, i) => (
-              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: s.bg, borderRadius: 10, padding: '10px 12px', flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 16 }}>{s.icon}</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: s.color, whiteSpace: 'nowrap' }}>{s.label}</div>
-                    <div style={{ fontSize: 10, color: '#9ca3af' }}>{s.n} cmd{s.n > 1 ? 's' : ''}</div>
+      {/* ══════════════ RACCOURCIS ══════════════ */}
+      <div style={{ ...box, padding: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: colors.text, marginBottom: 16 }}>Raccourcis</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+          {SHORTCUTS.map(s => (
+            <button
+              key={s.label}
+              onClick={() => navigate(s.to)}
+              style={{
+                background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 12,
+                padding: '14px 8px', textAlign: 'center', cursor: 'pointer',
+                transition: 'all 0.15s', outline: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = s.color
+                e.currentTarget.style.background  = s.color + '0d'
+                e.currentTarget.style.transform   = 'translateY(-1px)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = '#e8e8e3'
+                e.currentTarget.style.background  = '#fafaf8'
+                e.currentTarget.style.transform   = 'none'
+              }}
+            >
+              <div style={{
+                width: 38, height: 38, borderRadius: 10, background: s.color + '15',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+              }}>{s.icon}</div>
+              <span style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.4 }}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════ CONCURRENTS + NOTES ══════════════ */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+
+        {/* Suivi concurrents — données réelles */}
+        <div style={{ ...box, padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>Suivi concurrents</div>
+            <button
+              onClick={() => navigate('/concurrents')}
+              style={{ fontSize: 12, color: colors.primary, background: '#6366f110', padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            >Gérer →</button>
+          </div>
+
+          {recentCompetitors.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: colors.textFaint }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Aucun concurrent suivi</div>
+              <div style={{ fontSize: 12, marginBottom: 14 }}>Ajoutez des concurrents depuis la fiche produit</div>
+              <button
+                onClick={() => navigate('/concurrents')}
+                style={{ padding: '8px 16px', background: colors.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >Ouvrir le suivi →</button>
+            </div>
+          ) : (
+            <>
+              {recentCompetitors.map((c, i) => (
+                <div
+                  key={c.id || i}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 0',
+                    borderBottom: i < recentCompetitors.length - 1 ? '1px solid #f0f0eb' : 'none',
+                  }}
+                >
+                  <div style={{ width: 36, height: 36, background: '#f0f0eb', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>📦</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.competitor_name || 'Concurrent'}
+                    </div>
+                    {(c.products?.name || c.products?.asin) && (
+                      <div style={{ fontSize: 11, color: colors.textFaint, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.products?.name || c.products?.asin}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    {c.price != null && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: colors.text }}>{Number(c.price).toFixed(2)} €</div>
+                    )}
+                    {c.rating != null && (
+                      <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 1 }}>★ {c.rating}</div>
+                    )}
                   </div>
                 </div>
-                {i < pipe.length - 1 && (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="9 18 15 12 9 6"/></svg>
+              ))}
+              <div style={{ marginTop: 12, textAlign: 'right' }}>
+                <span
+                  onClick={() => navigate('/concurrents')}
+                  style={{ fontSize: 12, color: colors.primary, cursor: 'pointer', fontWeight: 500 }}
+                >Voir tous les suivis →</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Notes rapides — localStorage, entièrement fonctionnel */}
+        <div style={{ ...box, padding: 18 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: colors.text, marginBottom: 14 }}>📝 Notes rapides</div>
+
+          {/* Ajout de note */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <input
+              type="text"
+              placeholder="Nouvelle note (Entrée pour valider)..."
+              value={noteText}
+              onChange={e => setNoteText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addNote()}
+              style={{
+                flex: 1, padding: '9px 12px', background: '#fafaf8', border: '1px solid #e8e8e3',
+                borderRadius: 8, color: colors.text, fontSize: 12, outline: 'none',
+              }}
+            />
+            <button
+              onClick={addNote}
+              disabled={!noteText.trim()}
+              style={{
+                padding: '9px 16px', background: noteText.trim() ? colors.primary : '#e8e8e3',
+                color: noteText.trim() ? '#fff' : '#9ca3af', border: 'none', borderRadius: 8,
+                fontSize: 14, fontWeight: 700, cursor: noteText.trim() ? 'pointer' : 'default',
+                transition: 'background 0.15s', flexShrink: 0,
+              }}
+            >+</button>
+          </div>
+
+          {/* Liste des notes */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+            {sortedNotes.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: colors.textFaint, fontSize: 12 }}>
+                Aucune note. Écrivez quelque chose ci-dessus.
+              </div>
+            ) : sortedNotes.map(note => (
+              <div
+                key={note.id}
+                style={{
+                  background: note.pinned ? '#fffbeb' : '#fafaf8',
+                  border: `1px solid ${note.pinned ? '#fde68a' : '#e8e8e3'}`,
+                  borderRadius: 8, padding: '10px 12px',
+                }}
+              >
+                {editingNote === note.id ? (
+                  <EditNoteField
+                    initialText={note.text}
+                    onSave={text => saveEdit(note.id, text)}
+                    onCancel={() => setEditingNote(null)}
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: colors.textMuted, flex: 1, lineHeight: 1.5 }}>
+                      {note.pinned && <span style={{ marginRight: 4 }}>📌</span>}
+                      {note.text}
+                    </span>
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 1 }}>
+                      <NoteBtn title={note.pinned ? 'Désépingler' : 'Épingler'} onClick={() => togglePin(note.id)} color={note.pinned ? '#f59e0b' : colors.textFaint}>📌</NoteBtn>
+                      <NoteBtn title="Modifier" onClick={() => setEditingNote(note.id)} color={colors.textFaint}>✏️</NoteBtn>
+                      <NoteBtn title="Supprimer" onClick={() => deleteNote(note.id)} color="#ef4444">🗑</NoteBtn>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 14 }}>
-            <span
-              onClick={() => navigate('/commandes')}
-              style={{ fontSize: 12, color: '#6366f1', cursor: 'pointer', fontWeight: 500 }}
-            >Voir toutes les commandes →</span>
-          </div>
-        </div>
-
-        <div style={{ ...box, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12 }}>Raccourcis</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              { l: 'Importer facture', i: '📄', to: '/documents' },
-              { l: 'Ajouter un produit', i: '➕', to: '/produits' },
-              { l: 'Nouvelle commande', i: '📋', to: '/commandes' },
-              { l: 'Analyse IA', i: '🤖', to: '/analyse-ia' },
-            ].map(s => (
-              <button
-                key={s.l}
-                onClick={() => navigate(s.to)}
-                style={{ background: '#fafaf8', border: '1px solid #e8e8e3', borderRadius: 10, padding: '12px 8px', textAlign: 'center', cursor: 'pointer', color: '#6b7280', transition: 'border-color 0.15s, background 0.15s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.background = '#f5f5ff' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e8e8e3'; e.currentTarget.style.background = '#fafaf8' }}
-              >
-                <span style={{ display: 'block', fontSize: 20, marginBottom: 4 }}>{s.i}</span>
-                <span style={{ fontSize: 11 }}>{s.l}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-        <div style={{ ...box, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 14 }}>⚠️</span> Derniers avis clients négatifs
-          </div>
-          <div style={{ background: '#fafaf8', borderRadius: 10, padding: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-              <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, flex: 1 }}>Produit conforme mais l'emballage était abîmé.</span>
-              <span style={{ fontSize: 10, background: '#10b98115', color: '#10b981', padding: '3px 10px', borderRadius: 20, marginLeft: 8, whiteSpace: 'nowrap', fontWeight: 600 }}>Qualité</span>
-            </div>
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>ASIN: B08N5WRWNW · Il y a 2h</span>
-          </div>
-          <div style={{ marginTop: 10, textAlign: 'right' }}>
-            <span
-              onClick={() => navigate('/qualite-sav')}
-              style={{ fontSize: 12, color: '#6366f1', cursor: 'pointer', fontWeight: 500 }}
-            >Voir tous les avis →</span>
-          </div>
-        </div>
-
-        <div style={{ ...box, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            ⭐ Prochaines tâches
-          </div>
-          {[
-            { t: 'Commander réassort kit phare', d: '14 mai', done: false },
-            { t: 'Demander certificat CE fournisseur', d: '15 mai', done: false },
-            { t: 'Optimiser listing ASIN B08N5WRWNW', d: '16 mai', done: false },
-          ].map((t, i) => (
-            <div key={t.t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span style={{ color: '#10b981', fontSize: 13, flexShrink: 0 }}>✓</span>
-                <span style={{ fontSize: 12, color: '#6b7280' }}>{t.t}</span>
-              </div>
-              <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0, marginLeft: 8 }}>{t.d}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ ...box, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            📝 Notes rapides
-          </div>
-          <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.7, marginBottom: 6 }}>Relancer usine pour améliorer le packaging.</p>
-          <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>Tester nouveau visuel principal la semaine prochaine.</p>
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── Tiny helpers ───
+
+function ClickableKPI({ onClick, children }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{ cursor: 'pointer', transition: 'transform 0.15s' }}
+      onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
+      onMouseLeave={e => (e.currentTarget.style.transform = 'none')}
+    >
+      {children}
+    </div>
+  )
+}
+
+function NoteBtn({ onClick, color, title, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color, padding: '1px', lineHeight: 1 }}
+    >{children}</button>
   )
 }
