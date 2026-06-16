@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getProducts, getAlerts, getOrders, getShipments,
+  getProducts, getAlerts, getOrders,
   getSuppliers, getDocuments, getAllCompetitors,
 } from '../lib/supabase'
+import { listShipments } from '../lib/shipmentsRepo'
 import { computeAlerts, SEVERITY } from '../lib/alertsEngine'
 import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
@@ -121,7 +122,7 @@ export default function Dashboard() {
   // ── Data hooks — all from real Supabase tables ──
   const { data: productsData, loading: loadingP } = useData('products',     () => getProducts(user.id),        [user])
   const { data: ordersData,   loading: loadingO } = useData('orders',       () => getOrders(user.id),          [user])
-  const { data: shipmentsData,loading: loadingS } = useData('shipments',    () => getShipments(user.id),       [user])
+  const { data: shipmentsData,loading: loadingS } = useData('shipments',    () => listShipments(user.id),      [user])
   const { data: suppliersData,loading: loadingSu } = useData('suppliers',   () => getSuppliers(user.id),       [user])
   const { data: documentsData,loading: loadingD } = useData('documents',    () => getDocuments(user.id),       [user])
   const { data: competitorsData }                  = useData('competitors',  () => getAllCompetitors(user.id),  [user])
