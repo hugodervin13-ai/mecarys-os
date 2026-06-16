@@ -11,6 +11,44 @@ import { formatNumber, formatCurrency, formatDate } from '../lib/utils'
 import { box, colors } from '../lib/theme'
 import { KpiCard } from '../components/ui'
 import Loading from '../components/Loading'
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts'
+
+// ─── Métriques mock par période (à brancher sur Amazon SP-API quand dispo) ───
+const PERIOD_METRICS = {
+  hier: { ca: '9 240 €', caChange: 12.3, profit: '2 310 €', profitChange: 8.1, units: '34', unitsChange: 5.2 },
+  auj:  { ca: '3 180 €', caChange: 6.4,  profit: '795 €',   profitChange: 4.2, units: '11', unitsChange: 2.1 },
+  '7j': { ca: '72 300 €', caChange: 8.4, profit: '18 200 €', profitChange: 6.2, units: '82', unitsChange: 5.1 },
+  '30j':{ ca: '386 730 €',caChange: 22.8,profit: '97 430 €', profitChange: 16.7,units: '356',unitsChange: 12.2 },
+}
+const PERIOD_CHART = {
+  hier: [
+    { t: '06h', ca: 210, p: 52 }, { t: '09h', ca: 1140, p: 285 }, { t: '12h', ca: 2650, p: 662 },
+    { t: '15h', ca: 4280, p: 1070 }, { t: '18h', ca: 5540, p: 1385 }, { t: '21h', ca: 7120, p: 1780 },
+    { t: '00h', ca: 9240, p: 2310 },
+  ],
+  auj: [
+    { t: '06h', ca: 80, p: 20 }, { t: '08h', ca: 290, p: 72 }, { t: '10h', ca: 740, p: 185 },
+    { t: '12h', ca: 1240, p: 310 }, { t: '14h', ca: 1880, p: 470 }, { t: '16h', ca: 2450, p: 612 },
+    { t: '18h', ca: 3180, p: 795 },
+  ],
+  '7j': [
+    { t: 'Lun', ca: 7200, p: 1800 }, { t: 'Mar', ca: 9100, p: 2300 }, { t: 'Mer', ca: 8400, p: 2100 },
+    { t: 'Jeu', ca: 11200, p: 2800 }, { t: 'Ven', ca: 13500, p: 3400 }, { t: 'Sam', ca: 12100, p: 3100 },
+    { t: 'Dim', ca: 10800, p: 2700 },
+  ],
+  '30j': [
+    { t: '7 avr', ca: 52000, p: 13000 }, { t: '14 avr', ca: 74000, p: 18500 },
+    { t: '21 avr', ca: 98000, p: 24500 }, { t: '28 avr', ca: 112000, p: 28000 },
+    { t: '5 mai', ca: 142000, p: 35500 }, { t: '12 mai', ca: 174000, p: 43500 },
+    { t: '19 mai', ca: 198000, p: 49500 }, { t: '26 mai', ca: 224000, p: 56000 },
+    { t: '2 juin', ca: 256000, p: 64000 }, { t: '9 juin', ca: 298000, p: 74500 },
+    { t: '16 juin', ca: 386730, p: 97430 },
+  ],
+}
+const PERIOD_LABELS = { hier: 'Hier', auj: "Auj.", '7j': '7 jours', '30j': '30 jours' }
+const ttp = { backgroundColor: '#fff', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 12, padding: '8px 12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }
 
 // ─── Pipeline stages (mapped to real shipment statuses from Expeditions.jsx) ───
 const PIPELINE_STAGES = [
@@ -160,6 +198,7 @@ export default function Dashboard() {
   const recentCompetitors = competitors.slice(0, 4)
 
   // ── Notes (localStorage) ──
+  const [period, setPeriod]       = useState('30j')
   const [notes, setNotes]         = useState(loadNotes)
   const [noteText, setNoteText]   = useState('')
   const [editingNote, setEditingNote] = useState(null)
@@ -262,6 +301,66 @@ export default function Dashboard() {
         <ClickableKPI onClick={() => navigate('/documents')}>
           <KpiCard label="Documents" value={documents.length} icon="📄" color="#6b7280" sub={documents.length === 0 ? 'Aucun document' : 'enregistrés'} />
         </ClickableKPI>
+      </div>
+
+      {/* ══════════════ CA / PROFIT PAR PERIODE ══════════════ */}
+      <div style={{ ...box, padding: 20 }}>
+        {/* Tabs période */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>Chiffre d'affaires & Profit</div>
+          <div style={{ display: 'flex', gap: 4, background: '#f5f5f0', borderRadius: 9, padding: 3 }}>
+            {Object.entries(PERIOD_LABELS).map(([k, label]) => (
+              <button key={k} onClick={() => setPeriod(k)} style={{
+                padding: '5px 16px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                background: period === k ? '#fff' : 'transparent',
+                color: period === k ? colors.primary : colors.textMuted,
+                boxShadow: period === k ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              }}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {/* Métriques + graphiques */}
+        <div style={{ display: 'grid', gridTemplateColumns: '140px 140px 1fr 1fr', gap: 16, alignItems: 'start' }}>
+          {/* CA */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>CA ({PERIOD_LABELS[period]})</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: colors.text, letterSpacing: '-0.5px' }}>{PERIOD_METRICS[period].ca}</div>
+            <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, marginTop: 3 }}>↑ {PERIOD_METRICS[period].caChange}% vs préc.</div>
+          </div>
+          {/* Profit */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Profit ({PERIOD_LABELS[period]})</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#10b981', letterSpacing: '-0.5px' }}>{PERIOD_METRICS[period].profit}</div>
+            <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, marginTop: 3 }}>↑ {PERIOD_METRICS[period].profitChange}% vs préc.</div>
+          </div>
+          {/* Graph CA */}
+          <div>
+            <div style={{ fontSize: 11, color: colors.textFaint, marginBottom: 6 }}>Évolution CA</div>
+            <ResponsiveContainer width="100%" height={90}>
+              <AreaChart data={PERIOD_CHART[period]} margin={{ top: 2, right: 2, left: -30, bottom: 0 }}>
+                <defs><linearGradient id="caDG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity={0.2}/><stop offset="100%" stopColor="#6366f1" stopOpacity={0}/></linearGradient></defs>
+                <XAxis dataKey="t" stroke="#9ca3af" fontSize={9} tickLine={false} axisLine={false}/>
+                <YAxis hide/>
+                <Tooltip contentStyle={ttp} formatter={v => [`${v.toLocaleString('fr-FR')} €`, 'CA']}/>
+                <Area type="monotone" dataKey="ca" stroke="#6366f1" fill="url(#caDG)" strokeWidth={2} dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Graph Profit */}
+          <div>
+            <div style={{ fontSize: 11, color: colors.textFaint, marginBottom: 6 }}>Évolution Profit</div>
+            <ResponsiveContainer width="100%" height={90}>
+              <AreaChart data={PERIOD_CHART[period]} margin={{ top: 2, right: 2, left: -30, bottom: 0 }}>
+                <defs><linearGradient id="profDG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.2}/><stop offset="100%" stopColor="#10b981" stopOpacity={0}/></linearGradient></defs>
+                <XAxis dataKey="t" stroke="#9ca3af" fontSize={9} tickLine={false} axisLine={false}/>
+                <YAxis hide/>
+                <Tooltip contentStyle={ttp} formatter={v => [`${v.toLocaleString('fr-FR')} €`, 'Profit']}/>
+                <Area type="monotone" dataKey="p" stroke="#10b981" fill="url(#profDG)" strokeWidth={2} dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       </div>
 
       {/* ══════════════ PIPELINE + ALERTES ══════════════ */}

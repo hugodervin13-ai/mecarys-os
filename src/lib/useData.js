@@ -22,7 +22,14 @@ export function useData(key, fetcher, deps = []) {
     try {
       const res = await fetcherRef.current()
       if (res?.error) {
-        toast(`Erreur de chargement : ${res.error.message || 'réessayez plus tard'}`)
+        // Ne pas afficher de toast pour tables manquantes (DB pas encore migrée)
+        const msg = res.error.message || ''
+        const isTableMissing = msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('relation') || msg.includes('Could not find')
+        if (!isTableMissing) {
+          toast(`Erreur de chargement : ${msg || 'réessayez plus tard'}`)
+        }
+        setData([])
+        setCache(key, [])
       } else {
         const value = res?.data ?? res
         setData(value)
