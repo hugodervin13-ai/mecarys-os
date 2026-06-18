@@ -44,17 +44,22 @@ const localBackend = {
 const backend = localBackend
 
 // ── Types acceptés ──────────────────────────────────────────────────────
-export const ACCEPTED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx', 'xlsx', 'mp4', 'mov']
-export const ACCEPT_ATTR = '.jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xlsx,.mp4,.mov'
-const MAX_SIZE = 200 * 1024 * 1024 // 200 Mo
+export const ACCEPTED_EXT = [
+  'jpg','jpeg','png','webp','gif','heic','avif',           // images
+  'pdf',                                                    // pdf
+  'mp4','mov','avi','mkv','webm',                           // vidéos
+  'doc','docx','xls','xlsx','ppt','pptx','csv','txt','rtf', // documents
+]
+export const ACCEPT_ATTR = '.jpg,.jpeg,.png,.webp,.gif,.heic,.avif,.pdf,.mp4,.mov,.avi,.mkv,.webm,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.rtf'
+const MAX_SIZE = 500 * 1024 * 1024 // 500 Mo
 
 export const extOf = (name = '') => (name.split('.').pop() || '').toLowerCase()
 
 export const kindOf = (ext) => {
-  if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image'
+  if (['jpg','jpeg','png','webp','gif','heic','avif'].includes(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
-  if (['mp4', 'mov'].includes(ext)) return 'video'
-  if (['doc', 'docx', 'xlsx'].includes(ext)) return 'doc'
+  if (['mp4','mov','avi','mkv','webm'].includes(ext)) return 'video'
+  if (['doc','docx','xls','xlsx','ppt','pptx','csv','txt','rtf'].includes(ext)) return 'doc'
   return 'other'
 }
 
@@ -98,7 +103,7 @@ export async function uploadFiles(userId, fileList, parentId = null) {
   for (const file of Array.from(fileList)) {
     const ext = extOf(file.name)
     if (!ACCEPTED_EXT.includes(ext)) throw new Error(`Type non supporté : .${ext}`)
-    if (file.size > MAX_SIZE) throw new Error(`${file.name} dépasse 200 Mo`)
+    if (file.size > MAX_SIZE) throw new Error(`${file.name} dépasse 500 Mo`)
     const now = new Date().toISOString()
     const id = uid()
     await backend.putBlob(id, file)
@@ -111,6 +116,80 @@ export async function uploadFiles(userId, fileList, parentId = null) {
     created.push(node)
   }
   return created
+}
+
+// ── Mise à jour des métadonnées IA d'un node ────────────────────────────────
+export async function updateNodeMeta(id, meta) {
+  const node = await backend.getNode(id)
+  if (!node) return null
+  Object.assign(node, meta, { updatedAt: new Date().toISOString() })
+  return backend.putNode(node)
+}
+
+// ── Import de dossier avec organisation IA ──────────────────────────────────
+// Prend les résultats d'analyzeFiles() (chaque entrée a { file, category })
+// et crée les sous-dossiers de catégorie dans parentId avant d'uploader.
+// onProgress({ current, total }) est appelé à chaque fichier uploadé.
+export async function uploadWithAIOrganize(userId, parentId, analysisResults, onProgress) {
+  const groups = {}
+  for (const r of analysisResults) {
+    ;(groups[r.category] ||= []).push(r)
+  }
+
+  // Créer les dossiers de catégorie
+  const folderIds = {}
+  for (const cat of Object.keys(groups)) {
+    const folder = await createFolder(userId, { name: cat, parentId: parentId || null })
+    folderIds[cat] = folder.id
+  }
+
+  // Uploader les fichiers
+  let done = 0, uploaded = 0, skipped = 0
+  const all = Object.values(groups).flat()
+
+  for (const { file, category, metadata } of all) {
+    try {
+      const [node] = await uploadFiles(userId, [file], folderIds[category])
+      if (metadata && Object.keys(metadata).length) {
+        await updateNodeMeta(node.id, { aiCategory: category, aiMetadata: metadata, processedAt: new Date().toISOString() })
+      }
+      uploaded++
+    } catch { skipped++ }
+    done++
+    if (onProgress) onProgress({ current: done, total: all.length })
+    if (done % 5 === 0) await new Promise(r => setTimeout(r, 0))
+  }
+
+  return { uploaded, skipped, folders: Object.keys(groups).length, categories: Object.keys(groups) }
+}
+
+// ── Auto-organisation des fichiers existants (déplacement + catégorisation) ──
+// classifyFn(name, ext) → { category }
+export async function autoOrganizeNodes(userId, parentId, fileNodes, classifyFn, onProgress) {
+  const groups = {}
+  for (const n of fileNodes) {
+    const { category } = classifyFn(n.name, n.ext || extOf(n.name))
+    ;(groups[category] ||= []).push(n)
+  }
+
+  const folderIds = {}
+  for (const cat of Object.keys(groups)) {
+    const folder = await createFolder(userId, { name: cat, parentId: parentId || null })
+    folderIds[cat] = folder.id
+  }
+
+  let done = 0
+  for (const [cat, nodes] of Object.entries(groups)) {
+    for (const n of nodes) {
+      await moveNode(n.id, folderIds[cat], null)
+      await updateNodeMeta(n.id, { aiCategory: cat, processedAt: new Date().toISOString() })
+      done++
+      if (onProgress) onProgress({ current: done, total: fileNodes.length })
+    }
+    await new Promise(r => setTimeout(r, 0))
+  }
+
+  return { organized: fileNodes.length, folders: Object.keys(groups).length }
 }
 
 // ── Renommer / déplacer (dossiers et fichiers) ──────────────────────────
