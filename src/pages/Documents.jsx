@@ -9,7 +9,7 @@ import FilePreview from '../components/FilePreview'
 import {
   listNodes, createFolder, updateFolder, uploadFiles, uploadWithAIOrganize,
   autoOrganizeNodes, updateNodeMeta, renameNode, moveNode, deleteNode,
-  downloadFile, getFileUrl, folderStats, descendantIds, kindOf, extOf, formatSize,
+  downloadFile, getFileUrl, getThumbUrl, folderStats, descendantIds, kindOf, extOf, formatSize,
   dedupeAllNodes, renameAllNodes,
   ACCEPT_ATTR, ACCEPTED_EXT,
 } from '../lib/fileStore'
@@ -857,7 +857,7 @@ function GridCard({ node, stat, onOpen, onMenu }) {
   useEffect(() => {
     if (!isImg || !visible) return
     let revoke, alive = true
-    getFileUrl(node.id).then(url => {
+    getThumbUrl(node.id).then(url => {
       if (!url) return
       if (alive) { setThumbUrl(url); revoke = url }
       else URL.revokeObjectURL(url)

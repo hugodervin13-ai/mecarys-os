@@ -70,6 +70,26 @@ export const formatSize = (bytes = 0) => {
   return `${(bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`
 }
 
+// ── Miniatures compressées ──────────────────────────────────────────────────
+// Génère une vignette JPEG réduite (max 480 px) à partir d'une image.
+// Retourne null si ce n'est pas une image décodable (HEIC non supporté, etc.).
+const THUMB_PREFIX = 'thumb_'
+async function makeThumbnail(blob, maxDim = 480, quality = 0.72) {
+  if (!blob || !(blob.type || '').startsWith('image/')) return null
+  let bitmap
+  try { bitmap = await createImageBitmap(blob) } catch { return null }
+  const { width, height } = bitmap
+  const scale = Math.min(1, maxDim / Math.max(width, height))
+  const w = Math.max(1, Math.round(width * scale))
+  const h = Math.max(1, Math.round(height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w; canvas.height = h
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  if (bitmap.close) bitmap.close()
+  return new Promise(res => canvas.toBlob(b => res(b), 'image/jpeg', quality))
+}
+
 // ── Lecture ─────────────────────────────────────────────────────────────
 export async function listNodes(userId) {
   return backend.list(userId)
@@ -107,6 +127,11 @@ export async function uploadFiles(userId, fileList, parentId = null) {
     const now = new Date().toISOString()
     const id = uid()
     await backend.putBlob(id, file)
+    // Vignette compressée (best-effort, n'interrompt jamais l'upload)
+    try {
+      const thumb = await makeThumbnail(file)
+      if (thumb) await backend.putBlob(THUMB_PREFIX + id, thumb)
+    } catch { /* miniature optionnelle */ }
     const node = {
       id, userId, type: 'file', parentId,
       name: file.name, size: file.size, mime: file.type, ext,
@@ -228,6 +253,7 @@ export async function dedupeAllNodes(userId, onProgress) {
     group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)) // plus ancien d'abord
     for (const dup of group.slice(1)) {
       await backend.deleteBlob(dup.id).catch(() => {})
+      await backend.deleteBlob(THUMB_PREFIX + dup.id).catch(() => {})
       await backend.deleteNode(dup.id)
       removed++
       removedNames.push(dup.name)
@@ -308,7 +334,7 @@ export async function moveNode(id, newParentId, allNodes) {
   return backend.putNode(node)
 }
 
-// Supprime un node et, récursivement, tous ses descendants (+ leurs binaires).
+// Supprime un node et, récursivement, tous ses descendants (+ leurs binaires + vignettes).
 export async function deleteNode(id) {
   const node = await backend.getNode(id)
   if (!node) return 0
@@ -316,6 +342,7 @@ export async function deleteNode(id) {
   const ids = [id, ...descendantIds(id, all)]
   for (const nid of ids) {
     await backend.deleteBlob(nid).catch(() => {})
+    await backend.deleteBlob(THUMB_PREFIX + nid).catch(() => {})
     await backend.deleteNode(nid)
   }
   return ids.length
@@ -325,6 +352,22 @@ export async function deleteNode(id) {
 export async function getFileUrl(id) {
   const blob = await backend.getBlob(id)
   return blob ? URL.createObjectURL(blob) : null
+}
+
+// Vignette compressée pour l'affichage en grille. Génère à la volée + met en
+// cache si elle n'existe pas (fichiers importés avant cette fonctionnalité).
+// Retombe sur l'original si la miniature n'a pas pu être produite.
+export async function getThumbUrl(id) {
+  let thumb = await backend.getBlob(THUMB_PREFIX + id)
+  if (!thumb) {
+    const original = await backend.getBlob(id)
+    if (original && (original.type || '').startsWith('image/')) {
+      thumb = await makeThumbnail(original)
+      if (thumb) await backend.putBlob(THUMB_PREFIX + id, thumb)
+    }
+    if (!thumb) thumb = original
+  }
+  return thumb ? URL.createObjectURL(thumb) : null
 }
 
 export async function downloadFile(id, name) {
