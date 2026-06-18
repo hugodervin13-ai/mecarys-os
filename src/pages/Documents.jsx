@@ -9,7 +9,7 @@ import FilePreview from '../components/FilePreview'
 import {
   listNodes, createFolder, updateFolder, uploadFiles, uploadWithAIOrganize,
   autoOrganizeNodes, updateNodeMeta, renameNode, moveNode, deleteNode,
-  downloadFile, folderStats, descendantIds, kindOf, extOf, formatSize,
+  downloadFile, getFileUrl, folderStats, descendantIds, kindOf, extOf, formatSize,
   ACCEPT_ATTR, ACCEPTED_EXT,
 } from '../lib/fileStore'
 import {
@@ -25,6 +25,56 @@ const fileIcon = name => {
 const fileColor = name => {
   const k = kindOf(extOf(name))
   return k==='image'?'#6366f1':k==='pdf'?'#ef4444':k==='video'?'#ec4899':k==='doc'?'#10b981':'#6b7280'
+}
+
+// ─── Détection de doublons ───────────────────────────────────────────────────
+// Renvoie { unique: File[], dupes: File[] } en comparant nom + taille exacte
+const filterDuplicates = (fileList, existingNodes) => {
+  const existingSet = new Set(existingNodes.map(n => `${n.name}::${n.size}`))
+  const unique = [], dupes = []
+  for (const f of fileList) {
+    if (existingSet.has(`${f.name}::${f.size}`)) dupes.push(f)
+    else unique.push(f)
+  }
+  return { unique, dupes }
+}
+
+// ─── Suggestions de renommage intelligent ────────────────────────────────────
+const generateRenameSugs = (node, siblings) => {
+  if (node.type === 'folder') return []
+  const ext = node.ext ? `.${node.ext}` : ''
+  const base = node.name.replace(/\.[^.]+$/, '')
+  const sugs = new Set()
+
+  // 1. Nom nettoyé : underscores → espaces, majuscule initiale
+  const clean = base.trim().replace(/[_]+/g, ' ').replace(/\s+/g, ' ').replace(/^(.)/, c => c.toUpperCase())
+  if (clean + ext !== node.name) sugs.add(clean + ext)
+
+  // 2. Suggestion basée sur la catégorie IA
+  if (node.aiCategory) {
+    const cat = node.aiCategory
+    const samecat = siblings.filter(s => s.aiCategory === cat && s.id !== node.id).length + 1
+    const n = String(samecat).padStart(2, '0')
+    const labels = {
+      'Photos Produit': `Photo Produit ${n}`,
+      'Photos Packaging': `Packaging ${n}`,
+      'Avant / Après': `Avant-Après ${n}`,
+      'Vidéos': `Vidéo Produit ${n}`,
+      'Factures': `Facture ${n}`,
+      'Certificats': `Certificat ${n}`,
+      'Fiches de Sécurité': `Fiche Sécurité ${n}`,
+      'Notices': `Notice ${n}`,
+    }
+    if (labels[cat]) sugs.add(labels[cat] + ext)
+  }
+
+  // 3. Nom horodaté (utile pour factures/certifs)
+  const today = new Date().toLocaleDateString('fr-FR').replace(/\//g, '-')
+  if (node.aiCategory === 'Factures' || node.aiCategory === 'Certificats') {
+    sugs.add(`${clean} - ${today}${ext}`)
+  }
+
+  return [...sugs].filter(s => s !== node.name).slice(0, 4)
 }
 
 // ─── Etat de la pipeline IA ──────────────────────────────────────────────────
@@ -63,6 +113,7 @@ export default function Documents() {
   const [folderForm,   setFolderForm]   = useState({ name:'', asin:'' })
   const [renameModal,  setRenameModal]  = useState(null)
   const [renameVal,    setRenameVal]    = useState('')
+  const [renameSugs,   setRenameSugs]   = useState([])
   const [moveModal,    setMoveModal]    = useState(null)
   const [confirm,      setConfirm]      = useState(null)
 
@@ -189,8 +240,14 @@ export default function Documents() {
     if (atRoot) { toast("Ouvrez un dossier avant d'ajouter des fichiers"); return }
     setBusy(true)
     try {
-      const created = await uploadFiles(user.id, fileList, currentParentId)
-      toast(`${created.length} fichier${created.length>1?'s':''} ajouté${created.length>1?'s':''}`,'success')
+      const siblings = nodes.filter(n => n.parentId === currentParentId && n.type === 'file')
+      const { unique, dupes } = filterDuplicates(Array.from(fileList), siblings)
+      if (!unique.length) { toast(`${dupes.length} fichier${dupes.length>1?'s':''} déjà présent${dupes.length>1?'s':''} (doublons ignorés)`); setBusy(false); return }
+      const created = await uploadFiles(user.id, unique, currentParentId)
+      const msg = dupes.length
+        ? `${created.length} ajouté${created.length>1?'s':''} · ${dupes.length} doublon${dupes.length>1?'s':''} ignoré${dupes.length>1?'s':''}`
+        : `${created.length} fichier${created.length>1?'s':''} ajouté${created.length>1?'s':''}`
+      toast(msg, 'success')
       await load()
     } catch(e){ toast(e.message) } finally { setBusy(false) }
   }
@@ -276,7 +333,7 @@ export default function Documents() {
     const isF = node.type==='folder'
     return [
       { icon:isF?'📂':'👁️', label:isF?'Ouvrir':'Aperçu',    onClick:()=>openItem(node) },
-      { icon:'✏️',           label:'Renommer',               onClick:()=>{ setRenameModal(node); setRenameVal(node.name) } },
+      { icon:'✏️',           label:'Renommer',               onClick:()=>{ const sibs=nodes.filter(n=>n.parentId===currentParentId&&n.id!==node.id); setRenameModal(node); setRenameVal(node.name); setRenameSugs(generateRenameSugs(node,sibs)) } },
       { icon:'↪️',           label:'Déplacer',               onClick:()=>setMoveModal(node) },
       !isF&&{ icon:'⬇️',    label:'Télécharger',            onClick:()=>downloadFile(node.id,node.name) },
       { divider:true },
@@ -573,11 +630,25 @@ export default function Documents() {
       <Modal isOpen={!!renameModal} onClose={()=>setRenameModal(null)} title={renameModal?.type==='folder'?'Modifier le dossier':'Renommer le fichier'}>
         {renameModal && (
           <form onSubmit={submitRename}>
-            <div style={{ marginBottom:(renameModal.type==='folder'&&renameModal.isProduct)?12:20 }}>
+            <div style={{ marginBottom: renameSugs.length > 0 ? 8 : (renameModal.type==='folder'&&renameModal.isProduct)?12:20 }}>
               <label style={lbl}>Nom *</label>
               <input style={{ ...inp, background:'#fff', border:'1.5px solid #ebebE6' }} autoFocus value={renameVal}
                 onChange={e=>setRenameVal(e.target.value)} required />
             </div>
+            {/* Suggestions IA */}
+            {renameSugs.length > 0 && (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontSize:11, color:'#9ca3af', marginBottom:6, fontWeight:600, textTransform:'uppercase', letterSpacing:'.04em' }}>Suggestions</div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                  {renameSugs.map(s => (
+                    <button key={s} type="button" onClick={()=>setRenameVal(s)}
+                      style={{ padding:'4px 10px', borderRadius:20, border:`1.5px solid ${renameVal===s?'#5046e4':'#e5e7eb'}`, background:renameVal===s?'#eef2ff':'#fff', color:renameVal===s?'#5046e4':'#374151', fontSize:12, fontWeight:600, cursor:'pointer', transition:'all .1s' }}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {renameModal.type==='folder'&&renameModal.isProduct && (
               <div style={{ marginBottom:20 }}>
                 <label style={lbl}>ASIN Amazon</label>
@@ -653,57 +724,77 @@ function Breadcrumb({ path, goTo }) {
 
 // ── GridCard ──────────────────────────────────────────────────────────────────
 function GridCard({ node, stat, onOpen, onMenu }) {
-  const isF = node.type==='folder'
-  const cat = node.aiCategory ? CATEGORIES[node.aiCategory] : null
+  const isF    = node.type === 'folder'
+  const isImg  = !isF && kindOf(extOf(node.name)) === 'image'
+  const cat    = node.aiCategory ? CATEGORIES[node.aiCategory] : null
   const baseColor = isF ? '#5046e4' : fileColor(node.name)
+
+  const [thumbUrl, setThumbUrl] = useState(null)
+
+  useEffect(() => {
+    if (!isImg) return
+    let revoke
+    getFileUrl(node.id).then(url => {
+      if (url) { setThumbUrl(url); revoke = url }
+    })
+    return () => { if (revoke) URL.revokeObjectURL(revoke) }
+  }, [node.id, isImg])
 
   return (
     <div className="doc-card" onClick={onOpen} onContextMenu={onMenu}
-      style={{ background:'#fff', border:'1.5px solid #ebebE6', borderRadius:16, padding:16, position:'relative', display:'flex', flexDirection:'column', gap:10, animation:'docPop .15s ease' }}>
+      style={{ background:'#fff', border:'1.5px solid #ebebE6', borderRadius:16, overflow:'hidden', position:'relative', display:'flex', flexDirection:'column', animation:'docPop .15s ease' }}>
 
       {/* Menu button */}
       <button onClick={e=>{e.stopPropagation();onMenu(e)}}
-        style={{ position:'absolute', top:8, right:8, border:'none', background:'none', cursor:'pointer', fontSize:17, color:'#9ca3af', lineHeight:1, padding:4, opacity:0 }}
+        style={{ position:'absolute', top:8, right:8, zIndex:2, border:'none', background:'rgba(255,255,255,0.85)', backdropFilter:'blur(4px)', cursor:'pointer', fontSize:17, color:'#374151', lineHeight:1, padding:'3px 6px', borderRadius:8, opacity:0, transition:'opacity .15s' }}
         onMouseEnter={e=>(e.currentTarget.style.opacity='1')}
         onMouseLeave={e=>(e.currentTarget.style.opacity='0')}
       >⋯</button>
 
-      {/* Icon */}
-      <div style={{ width:48, height:48, borderRadius:13, background:`${baseColor}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:26 }}>
-        {isF ? '📁' : fileIcon(node.name)}
-      </div>
+      {/* Zone image (si image avec thumb chargé) */}
+      {isImg ? (
+        <div style={{ width:'100%', aspectRatio:'4/3', background:`${baseColor}10`, overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          {thumbUrl
+            ? <img src={thumbUrl} alt={node.name} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+            : <span style={{ fontSize:32, opacity:0.4 }}>🖼️</span>
+          }
+        </div>
+      ) : (
+        /* Icône standard pour dossiers + fichiers non-image */
+        <div style={{ padding:'14px 14px 0', display:'flex', alignItems:'center' }}>
+          <div style={{ width:46, height:46, borderRadius:12, background:`${baseColor}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>
+            {isF ? '📁' : fileIcon(node.name)}
+          </div>
+        </div>
+      )}
 
-      {/* Name */}
-      <div style={{ minWidth:0, flex:1 }}>
+      {/* Métadonnées */}
+      <div style={{ padding: isImg ? '10px 12px 12px' : '8px 14px 14px', flex:1, minWidth:0 }}>
         <div style={{ fontSize:12, fontWeight:700, color:'#111827', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', lineHeight:1.3 }}>{node.name}</div>
 
-        {/* ASIN */}
         {node.asin && <div style={{ fontSize:10, color:'#9ca3af', fontFamily:'monospace', marginTop:2 }}>{node.asin}</div>}
 
-        {/* Stats */}
         {isF ? (
-          <div style={{ fontSize:10, color:'#9ca3af', marginTop:4 }}>
+          <div style={{ fontSize:10, color:'#9ca3af', marginTop:3 }}>
             {stat?.files??0} fichier{(stat?.files??0)>1?'s':''} · {formatSize(stat?.size)}
           </div>
         ) : (
-          <div style={{ fontSize:10, color:'#9ca3af', marginTop:4 }}>{(node.ext||'').toUpperCase()} · {formatSize(node.size)}</div>
+          <div style={{ fontSize:10, color:'#9ca3af', marginTop:3 }}>{(node.ext||'').toUpperCase()} · {formatSize(node.size)}</div>
         )}
 
-        {/* AI category badge */}
         {node.aiCategory && (
-          <div style={{ marginTop:6 }}>
+          <div style={{ marginTop:5 }}>
             <span style={{ fontSize:9, fontWeight:700, padding:'2px 7px', borderRadius:20, background:`${cat?.color||'#6366f1'}12`, color:cat?.color||'#6366f1', whiteSpace:'nowrap' }}>
               {cat?.icon} {node.aiCategory}
             </span>
           </div>
         )}
 
-        {/* AI metadata preview */}
-        {node.aiMetadata && Object.keys(node.aiMetadata).length>0 && (
+        {node.aiMetadata && Object.keys(node.aiMetadata).length > 0 && (
           <div style={{ fontSize:9, color:'#9ca3af', marginTop:4, lineHeight:1.4 }}>
-            {Object.entries(node.aiMetadata).slice(0,2).map(([k,v])=>(
+            {Object.entries(node.aiMetadata).slice(0,2).map(([k,v]) => (
               <span key={k} style={{ marginRight:6 }}>
-                <span style={{ textTransform:'capitalize' }}>{k}</span> : {v}
+                <span style={{ textTransform:'capitalize' }}>{k}</span>: {v}
               </span>
             ))}
           </div>
