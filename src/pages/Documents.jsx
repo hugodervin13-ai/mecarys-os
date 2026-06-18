@@ -73,6 +73,14 @@ export default function Documents() {
   const fileInputRef   = useRef(null)
   const folderInputRef = useRef(null)
 
+  // webkitdirectory doit être posé en impératif (pas supporté comme prop JSX en React 19)
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '')
+      folderInputRef.current.setAttribute('directory', '')
+    }
+  }, [])
+
   // ── Chargement ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     if (!user) return
@@ -193,12 +201,17 @@ export default function Documents() {
     const valid = Array.from(fileList).filter(f => ACCEPTED_EXT.includes(extOf(f.name)))
     if (!valid.length) { toast('Aucun fichier compatible trouvé'); return }
 
-    setAI(AI_INIT(valid.length))
-    const results = await analyzeFiles(valid, ({current,total}) =>
-      setAI(s => ({...s, progress:current/total, current, total}))
-    )
-    const groups = groupByCategory(results)
-    setAI(AI_REVIEW(results, groups))
+    try {
+      setAI(AI_INIT(valid.length))
+      const results = await analyzeFiles(valid, ({current,total}) =>
+        setAI(s => ({...s, progress:current/total, current, total}))
+      )
+      const groups = groupByCategory(results)
+      setAI(AI_REVIEW(results, groups))
+    } catch(e) {
+      setAI(AI_IDLE)
+      toast(e?.message || 'Erreur lors de l\'analyse')
+    }
   }
 
   const confirmAIImport = async () => {
@@ -515,7 +528,7 @@ export default function Documents() {
       {/* Inputs cachés */}
       <input ref={fileInputRef} type="file" multiple accept={ACCEPT_ATTR} style={{ display:'none' }}
         onChange={e=>{ handleFiles(e.target.files); e.target.value='' }} />
-      <input ref={folderInputRef} type="file" multiple webkitdirectory="" style={{ display:'none' }}
+      <input ref={folderInputRef} type="file" multiple style={{ display:'none' }}
         onChange={e=>{ handleFolderImport(e.target.files); e.target.value='' }} />
 
       {/* ══════════ OVERLAY PIPELINE IA ══════════ */}
@@ -653,7 +666,6 @@ function GridCard({ node, stat, onOpen, onMenu }) {
         style={{ position:'absolute', top:8, right:8, border:'none', background:'none', cursor:'pointer', fontSize:17, color:'#9ca3af', lineHeight:1, padding:4, opacity:0 }}
         onMouseEnter={e=>(e.currentTarget.style.opacity='1')}
         onMouseLeave={e=>(e.currentTarget.style.opacity='0')}
-        ref={el=>{ if(el){ el.parentElement.addEventListener('mouseenter',()=>el.style.opacity='1'); el.parentElement.addEventListener('mouseleave',()=>el.style.opacity='0') } }}
       >⋯</button>
 
       {/* Icon */}
