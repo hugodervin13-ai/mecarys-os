@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { getProducts } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
@@ -7,10 +7,11 @@ import { box } from '../lib/theme'
 import { computeProfit, margeColor } from '../lib/profit'
 import { DemoBadge } from '../components/ui'
 import Loading from '../components/Loading'
-import {
-  AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-} from 'recharts'
+import ChartSkeleton from '../components/charts/ChartSkeleton'
+
+// Recharts (~386 Ko) chargé à la demande.
+const VentesArea = lazy(() => import('../components/charts/VentesCharts').then(m => ({ default: m.VentesArea })))
+const VentesBar  = lazy(() => import('../components/charts/VentesCharts').then(m => ({ default: m.VentesBar })))
 
 const DATA = {
   '7j': {
@@ -43,8 +44,6 @@ const DATA = {
     ca: 1091730, profit: 277430, units: 1012, panier: 1079,
   },
 }
-
-const TOOLTIP_STYLE = { backgroundColor: '#ffffff', border: '1px solid #e8e8e3', borderRadius: 8, color: '#1a1a2e', fontSize: 12 }
 
 export default function VentesProfit() {
   const { user } = useStore()
@@ -123,40 +122,16 @@ export default function VentesProfit() {
               </span>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={d.chart}>
-              <defs>
-                <linearGradient id="gVentes" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gProfit" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" />
-              <XAxis dataKey="label" stroke="#9ca3af" fontSize={11} />
-              <YAxis stroke="#9ca3af" fontSize={11} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => formatCurrency(v)} />
-              <Area type="monotone" dataKey="ventes" stroke="#6366f1" fill="url(#gVentes)" strokeWidth={2} name="Ventes" />
-              <Area type="monotone" dataKey="profit" stroke="#10b981" fill="url(#gProfit)" strokeWidth={2} name="Profit" />
-            </AreaChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartSkeleton height={240} />}>
+            <VentesArea data={d.chart} />
+          </Suspense>
         </div>
 
         <div style={{ ...box, padding: 22 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', marginBottom: 18 }}>Ventes vs Profit par période</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={d.chart} barCategoryGap="30%">
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" />
-              <XAxis dataKey="label" stroke="#9ca3af" fontSize={11} />
-              <YAxis stroke="#9ca3af" fontSize={11} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => formatCurrency(v)} />
-              <Bar dataKey="ventes" fill="#6366f1" radius={[4, 4, 0, 0]} name="Ventes" />
-              <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} name="Profit" />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartSkeleton height={240} />}>
+            <VentesBar data={d.chart} />
+          </Suspense>
         </div>
       </div>
 

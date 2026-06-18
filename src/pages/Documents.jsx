@@ -838,18 +838,35 @@ function GridCard({ node, stat, onOpen, onMenu }) {
   const baseColor = isF ? '#5046e4' : fileColor(node.name)
 
   const [thumbUrl, setThumbUrl] = useState(null)
+  const [visible,  setVisible]  = useState(false)
+  const cardRef = useRef(null)
 
+  // Ne déclencher le chargement que lorsque la carte approche de l'écran.
   useEffect(() => {
-    if (!isImg) return
-    let revoke
+    if (!isImg || visible) return
+    const el = cardRef.current
+    if (!el) return
+    const io = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) { setVisible(true); io.disconnect() }
+    }, { rootMargin: '300px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [isImg, visible])
+
+  // Charger le blob uniquement une fois la carte visible.
+  useEffect(() => {
+    if (!isImg || !visible) return
+    let revoke, alive = true
     getFileUrl(node.id).then(url => {
-      if (url) { setThumbUrl(url); revoke = url }
+      if (!url) return
+      if (alive) { setThumbUrl(url); revoke = url }
+      else URL.revokeObjectURL(url)
     })
-    return () => { if (revoke) URL.revokeObjectURL(revoke) }
-  }, [node.id, isImg])
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke) }
+  }, [node.id, isImg, visible])
 
   return (
-    <div className="doc-card" onClick={onOpen} onContextMenu={onMenu}
+    <div ref={cardRef} className="doc-card" onClick={onOpen} onContextMenu={onMenu}
       style={{ background:'#fff', border:'1.5px solid #ebebE6', borderRadius:16, overflow:'hidden', position:'relative', display:'flex', flexDirection:'column', animation:'docPop .15s ease' }}>
 
       {/* Menu button */}
@@ -863,7 +880,7 @@ function GridCard({ node, stat, onOpen, onMenu }) {
       {isImg ? (
         <div style={{ width:'100%', aspectRatio:'4/3', background:`${baseColor}10`, overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
           {thumbUrl
-            ? <img src={thumbUrl} alt={node.name} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+            ? <img src={thumbUrl} alt={node.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
             : <span style={{ fontSize:32, opacity:0.4 }}>🖼️</span>
           }
         </div>

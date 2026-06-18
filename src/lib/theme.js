@@ -18,10 +18,23 @@ export const colors = {
   info: '#3b82f6',
 }
 
+// Ombres standardisées (profondeur cohérente sur toute l'app)
+export const shadow = {
+  sm: '0 1px 2px rgba(16,24,40,0.05)',
+  md: '0 4px 12px rgba(16,24,40,0.08)',
+  lg: '0 12px 32px rgba(16,24,40,0.12)',
+  xl: '0 24px 64px rgba(16,24,40,0.18)',
+}
+
+// Échelles partagées
+export const radius  = { sm: 8, md: 12, lg: 16, xl: 24, full: 999 }
+export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 }
+
 export const box = {
   background: colors.surface,
   border: `1px solid ${colors.border}`,
   borderRadius: 14,
+  boxShadow: shadow.sm,
 }
 
 export const inp = {
