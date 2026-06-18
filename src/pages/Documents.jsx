@@ -80,7 +80,7 @@ const generateRenameSugs = (node, siblings) => {
 // ─── Etat de la pipeline IA ──────────────────────────────────────────────────
 const AI_IDLE    = { phase:'idle' }
 const AI_INIT    = (total) => ({ phase:'analyzing', progress:0, current:0, total, results:null, groups:null })
-const AI_REVIEW  = (results,groups) => ({ phase:'reviewing', results, groups })
+const AI_REVIEW  = (results,groups,mode='import') => ({ phase:'reviewing', mode, results, groups })
 const AI_UPLOAD  = (total) => ({ phase:'uploading', progress:0, current:0, total })
 const AI_ORGANIZE= (total) => ({ phase:'organizing', progress:0, current:0, total })
 const AI_DONE    = (summary) => ({ phase:'done', summary })
@@ -274,6 +274,33 @@ export default function Documents() {
   const confirmAIImport = async () => {
     if (!ai.results) return
     const total = ai.results.length
+
+    // ── Mode organisation : déplacer les fichiers existants ─────────────────
+    if (ai.mode === 'organize') {
+      setAI(AI_ORGANIZE(total))
+      try {
+        const groups = ai.groups
+        const folderIds = {}
+        for (const cat of Object.keys(groups)) {
+          const folder = await createFolder(user.id, { name:cat, parentId:currentParentId||null })
+          folderIds[cat] = folder.id
+        }
+        let done = 0
+        for (const r of ai.results) {
+          await moveNode(r.file.id, folderIds[r.category], nodes)
+          if (r.metadata && Object.keys(r.metadata).length)
+            await updateNodeMeta(r.file.id, { aiCategory:r.category, aiMetadata:r.metadata, processedAt:new Date().toISOString() })
+          done++
+          setAI(s=>({...s, progress:done/total, current:done, total}))
+          if (done % 5 === 0) await new Promise(res=>setTimeout(res,0))
+        }
+        await load()
+        setAI(AI_DONE({ organized:done, folders:Object.keys(groups).length, skipped:0 }))
+      } catch(e) { toast(e.message); setAI(AI_IDLE) }
+      return
+    }
+
+    // ── Mode import : uploader les fichiers analysés ─────────────────────────
     setAI(AI_UPLOAD(total))
     try {
       const summary = await uploadWithAIOrganize(user.id, currentParentId, ai.results,
@@ -284,18 +311,22 @@ export default function Documents() {
     } catch(e) { toast(e.message); setAI(AI_IDLE) }
   }
 
-  // ── Auto-organisation des fichiers existants ─────────────────────────────
-  const handleAutoOrganize = async () => {
-    if (!unorganizedFiles.length) { toast('Aucun fichier à organiser'); return }
-    setAI(AI_ORGANIZE(unorganizedFiles.length))
+  // ── Analyser les fichiers déjà présents dans le dossier courant ──────────
+  const handleAnalyzeExisting = async () => {
+    const currentFiles = nodes.filter(n => n.type==='file' && n.parentId===currentParentId)
+    if (!currentFiles.length) { toast('Aucun fichier dans ce dossier'); return }
     try {
-      const summary = await autoOrganizeNodes(user.id, currentParentId, unorganizedFiles,
-        (name,ext)=>classifyFile(name,ext),
-        ({current,total}) => setAI(s=>({...s, progress:current/total, current, total}))
+      setAI(AI_INIT(currentFiles.length))
+      // analyzeFiles n'utilise que f.name — les nodes conviennent parfaitement
+      const results = await analyzeFiles(currentFiles, ({current,total}) =>
+        setAI(s=>({...s, progress:current/total, current, total}))
       )
-      await load()
-      setAI(AI_DONE(summary))
-    } catch(e) { toast(e.message); setAI(AI_IDLE) }
+      const groups = groupByCategory(results)
+      setAI(AI_REVIEW(results, groups, 'organize'))
+    } catch(e) {
+      setAI(AI_IDLE)
+      toast(e?.message || 'Erreur lors de l\'analyse')
+    }
   }
 
   // ── Renommer ────────────────────────────────────────────────────────────
@@ -367,13 +398,21 @@ export default function Documents() {
         <Breadcrumb path={path} goTo={goTo} />
 
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-          {/* Importer un dossier (⭐ nouveau) */}
+          {/* Analyser les fichiers existants */}
+          {!atRoot && nodes.some(n=>n.type==='file'&&n.parentId===currentParentId) && (
+            <button onClick={handleAnalyzeExisting} disabled={busy}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'linear-gradient(135deg,#5046e4,#7c3aed)', color:'#fff', border:'none', borderRadius:10, fontSize:13, fontWeight:600, cursor:busy?'wait':'pointer', boxShadow:'0 2px 8px rgba(80,70,228,0.25)' }}>
+              ✨ Analyser avec l'IA
+            </button>
+          )}
+
+          {/* Importer un dossier */}
           {!atRoot && (
             <button
               onClick={()=>folderInputRef.current?.click()} disabled={busy}
-              style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'linear-gradient(135deg,#5046e4,#7c3aed)', color:'#fff', border:'none', borderRadius:10, fontSize:13, fontWeight:600, cursor:busy?'wait':'pointer', boxShadow:'0 2px 8px rgba(80,70,228,0.25)' }}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'#fff', color:'#5046e4', border:'1.5px solid #5046e4', borderRadius:10, fontSize:13, fontWeight:600, cursor:busy?'wait':'pointer' }}
             >
-              ✨ Importer un dossier
+              ⬆ Importer un dossier
             </button>
           )}
 
@@ -426,8 +465,8 @@ export default function Documents() {
               {unorganizedFiles.length} fichier{unorganizedFiles.length>1?'s':''} non classé{unorganizedFiles.length>1?'s':''} dans ce dossier — l'IA peut créer les sous-dossiers et les ranger automatiquement.
             </div>
           </div>
-          <button onClick={handleAutoOrganize} style={{ padding:'8px 16px', background:'#5046e4', color:'#fff', border:'none', borderRadius:9, fontSize:12, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
-            Organiser maintenant
+          <button onClick={handleAnalyzeExisting} style={{ padding:'8px 16px', background:'#5046e4', color:'#fff', border:'none', borderRadius:9, fontSize:12, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
+            Analyser et organiser
           </button>
           <button onClick={()=>setDismissOrganize(true)} style={{ background:'none', border:'none', cursor:'pointer', color:'#7c3aed', fontSize:16, padding:4 }} title="Ignorer">✕</button>
         </div>
@@ -806,7 +845,8 @@ function GridCard({ node, stat, onOpen, onMenu }) {
 
 // ── AI Processing Overlay ─────────────────────────────────────────────────────
 function AIOverlay({ state, onConfirm, onClose }) {
-  const { phase, progress, current, total, groups, summary } = state
+  const { phase, progress, current, total, groups, summary, mode } = state
+  const isOrganize = mode === 'organize'
   const isActive = ['analyzing','uploading','organizing'].includes(phase)
   const pct = Math.round((progress||0)*100)
 
@@ -820,7 +860,7 @@ function AIOverlay({ state, onConfirm, onClose }) {
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:'#111827' }}>
               {phase==='analyzing'  && 'Analyse IA en cours…'}
-              {phase==='reviewing'  && 'Aperçu de l\'organisation'}
+              {phase==='reviewing'  && (isOrganize ? 'Aperçu de l\'organisation' : 'Aperçu de l\'import IA')}
               {phase==='uploading'  && 'Import en cours…'}
               {phase==='organizing' && 'Organisation en cours…'}
               {phase==='done'       && 'Terminé !'}
@@ -828,7 +868,7 @@ function AIOverlay({ state, onConfirm, onClose }) {
             <div style={{ fontSize:12, color:'#9ca3af', marginTop:2 }}>
               {isActive && `${current||0} / ${total||0} fichiers`}
               {phase==='reviewing' && `${state.results?.length||0} fichiers → ${Object.keys(groups||{}).length} catégories`}
-              {phase==='done' && `Import réussi`}
+              {phase==='done' && (isOrganize ? 'Organisation réussie' : 'Import réussi')}
             </div>
           </div>
           {!isActive && phase!=='done' && (
@@ -878,7 +918,7 @@ function AIOverlay({ state, onConfirm, onClose }) {
             <div style={{ fontSize:24, marginBottom:8, textAlign:'center' }}>✅</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, textAlign:'center' }}>
               {[
-                { label:'Fichiers importés', value:summary.uploaded||summary.organized||0 },
+                { label: isOrganize ? 'Fichiers organisés' : 'Fichiers importés', value:summary.uploaded||summary.organized||0 },
                 { label:'Dossiers créés',    value:summary.folders||0 },
                 { label:'Ignorés',           value:summary.skipped||0 },
               ].map(s=>(
@@ -899,7 +939,9 @@ function AIOverlay({ state, onConfirm, onClose }) {
                 Annuler
               </button>
               <button onClick={onConfirm} style={{ flex:2, padding:'11px', background:'linear-gradient(135deg,#5046e4,#7c3aed)', color:'#fff', border:'none', borderRadius:10, fontSize:13, fontWeight:700, cursor:'pointer' }}>
-                ✨ Importer et organiser ({state.results?.length} fichiers)
+                {isOrganize
+                  ? `✨ Organiser (${state.results?.length} fichiers)`
+                  : `✨ Importer et organiser (${state.results?.length} fichiers)`}
               </button>
             </>
           )}
