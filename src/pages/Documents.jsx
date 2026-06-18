@@ -10,6 +10,7 @@ import {
   listNodes, createFolder, updateFolder, uploadFiles, uploadWithAIOrganize,
   autoOrganizeNodes, updateNodeMeta, renameNode, moveNode, deleteNode,
   downloadFile, getFileUrl, folderStats, descendantIds, kindOf, extOf, formatSize,
+  dedupeAllNodes, renameAllNodes,
   ACCEPT_ATTR, ACCEPTED_EXT,
 } from '../lib/fileStore'
 import {
@@ -84,6 +85,7 @@ const AI_REVIEW  = (results,groups,mode='import') => ({ phase:'reviewing', mode,
 const AI_UPLOAD  = (total) => ({ phase:'uploading', progress:0, current:0, total })
 const AI_ORGANIZE= (total) => ({ phase:'organizing', progress:0, current:0, total })
 const AI_DONE    = (summary) => ({ phase:'done', summary })
+const AI_CLEAN   = (label,total) => ({ phase:'cleaning', label, progress:0, current:0, total })
 
 export default function Documents() {
   const { user } = useStore()
@@ -116,6 +118,7 @@ export default function Documents() {
   const [renameSugs,   setRenameSugs]   = useState([])
   const [moveModal,    setMoveModal]    = useState(null)
   const [confirm,      setConfirm]      = useState(null)
+  const [cleanConfirm, setCleanConfirm] = useState(false)
 
   // ── Pipeline IA ─────────────────────────────────────────────────────────
   const [ai, setAI] = useState(AI_IDLE)
@@ -311,6 +314,28 @@ export default function Documents() {
     } catch(e) { toast(e.message); setAI(AI_IDLE) }
   }
 
+  // ── 🤖 Nettoyage complet : dédoublonnage + renommage de TOUTE la bibliothèque ──
+  const handleCleanAll = async () => {
+    setCleanConfirm(false)
+    const allFiles = nodes.filter(n => n.type === 'file')
+    if (!allFiles.length) { toast('Aucun fichier à nettoyer'); return }
+    try {
+      // Étape 1 — supprimer les doublons par contenu identique
+      setAI(AI_CLEAN('Recherche des doublons identiques…', allFiles.length))
+      const dedup = await dedupeAllNodes(user.id, ({current,total}) =>
+        setAI(s => ({...s, progress:current/total, current, total}))
+      )
+      // Étape 2 — renommer chaque fichier (Catégorie NN.ext)
+      const remaining = allFiles.length - dedup.removed
+      setAI(AI_CLEAN('Renommage intelligent des fichiers…', remaining))
+      const ren = await renameAllNodes(user.id, classifyFile, ({current,total}) =>
+        setAI(s => ({...s, progress:current/total, current, total}))
+      )
+      await load()
+      setAI({ phase:'done', mode:'clean', summary:{ removed:dedup.removed, renamed:ren.renamed, scanned:dedup.scanned } })
+    } catch(e) { toast(e.message); setAI(AI_IDLE) }
+  }
+
   // ── Analyser les fichiers déjà présents dans le dossier courant ──────────
   const handleAnalyzeExisting = async () => {
     const currentFiles = nodes.filter(n => n.type==='file' && n.parentId===currentParentId)
@@ -398,6 +423,14 @@ export default function Documents() {
         <Breadcrumb path={path} goTo={goTo} />
 
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          {/* 🤖 Nettoyage complet de toute la bibliothèque */}
+          {nodes.some(n=>n.type==='file') && (
+            <button onClick={()=>setCleanConfirm(true)} disabled={busy}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'linear-gradient(135deg,#059669,#10b981)', color:'#fff', border:'none', borderRadius:10, fontSize:13, fontWeight:700, cursor:busy?'wait':'pointer', boxShadow:'0 2px 8px rgba(5,150,105,0.25)' }}>
+              🤖 Tout nettoyer
+            </button>
+          )}
+
           {/* Analyser les fichiers existants */}
           {!atRoot && nodes.some(n=>n.type==='file'&&n.parentId===currentParentId) && (
             <button onClick={handleAnalyzeExisting} disabled={busy}
@@ -636,6 +669,42 @@ export default function Documents() {
         />
       )}
 
+      {/* ── Modale : confirmation nettoyage complet ── */}
+      <Modal isOpen={cleanConfirm} onClose={()=>setCleanConfirm(false)} title="🤖 Nettoyer toute la bibliothèque">
+        <div>
+          <p style={{ fontSize:14, color:'#111827', lineHeight:1.6, marginBottom:14 }}>
+            L'IA va parcourir <strong>tous vos fichiers</strong> et :
+          </p>
+          <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:18 }}>
+            <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+              <span style={{ fontSize:18 }}>🗑️</span>
+              <div style={{ fontSize:13, color:'#374151', lineHeight:1.5 }}>
+                <strong>Supprimer les doublons identiques</strong> — détectés par contenu, pas seulement par nom. Garde l'exemplaire le plus ancien.
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+              <span style={{ fontSize:18 }}>✏️</span>
+              <div style={{ fontSize:13, color:'#374151', lineHeight:1.5 }}>
+                <strong>Renommer chaque fichier</strong> selon sa catégorie — ex : <code style={{ background:'#f3f4f6', padding:'1px 6px', borderRadius:5, fontSize:12 }}>Photo Produit 01.jpg</code>
+              </div>
+            </div>
+          </div>
+          <p style={{ fontSize:12, color:'#dc2626', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:8, padding:'9px 12px', marginBottom:16 }}>
+            ⚠️ Action irréversible : les doublons seront définitivement supprimés.
+          </p>
+          <div style={{ display:'flex', gap:10 }}>
+            <button onClick={()=>setCleanConfirm(false)}
+              style={{ flex:1, padding:12, background:'#fff', color:'#6b7280', border:'1.5px solid #ebebE6', borderRadius:10, fontSize:14, fontWeight:600, cursor:'pointer' }}>
+              Annuler
+            </button>
+            <button onClick={handleCleanAll}
+              style={{ flex:2, padding:12, background:'linear-gradient(135deg,#059669,#10b981)', color:'#fff', border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:'pointer' }}>
+              🤖 Lancer le nettoyage
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Menu contextuel */}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.node)} onClose={()=>setMenu(null)} />}
 
@@ -845,10 +914,13 @@ function GridCard({ node, stat, onOpen, onMenu }) {
 
 // ── AI Processing Overlay ─────────────────────────────────────────────────────
 function AIOverlay({ state, onConfirm, onClose }) {
-  const { phase, progress, current, total, groups, summary, mode } = state
+  const { phase, progress, current, total, groups, summary, mode, label } = state
   const isOrganize = mode === 'organize'
-  const isActive = ['analyzing','uploading','organizing'].includes(phase)
+  const isClean = mode === 'clean'
+  const isActive = ['analyzing','uploading','organizing','cleaning'].includes(phase)
   const pct = Math.round((progress||0)*100)
+  const accent = (phase==='cleaning' || isClean) ? 'linear-gradient(135deg,#059669,#10b981)' : 'linear-gradient(135deg,#5046e4,#7c3aed)'
+  const barAccent = (phase==='cleaning' || isClean) ? 'linear-gradient(90deg,#059669,#10b981)' : 'linear-gradient(90deg,#5046e4,#7c3aed)'
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:300, background:'rgba(10,10,20,0.7)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
@@ -856,19 +928,20 @@ function AIOverlay({ state, onConfirm, onClose }) {
 
         {/* Header */}
         <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:24 }}>
-          <div style={{ width:44, height:44, borderRadius:14, background:'linear-gradient(135deg,#5046e4,#7c3aed)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22 }}>✨</div>
+          <div style={{ width:44, height:44, borderRadius:14, background:accent, display:'flex', alignItems:'center', justifyContent:'center', fontSize:22 }}>{(phase==='cleaning'||isClean)?'🤖':'✨'}</div>
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:'#111827' }}>
               {phase==='analyzing'  && 'Analyse IA en cours…'}
               {phase==='reviewing'  && (isOrganize ? 'Aperçu de l\'organisation' : 'Aperçu de l\'import IA')}
               {phase==='uploading'  && 'Import en cours…'}
               {phase==='organizing' && 'Organisation en cours…'}
+              {phase==='cleaning'   && (label || 'Nettoyage en cours…')}
               {phase==='done'       && 'Terminé !'}
             </div>
             <div style={{ fontSize:12, color:'#9ca3af', marginTop:2 }}>
               {isActive && `${current||0} / ${total||0} fichiers`}
               {phase==='reviewing' && `${state.results?.length||0} fichiers → ${Object.keys(groups||{}).length} catégories`}
-              {phase==='done' && (isOrganize ? 'Organisation réussie' : 'Import réussi')}
+              {phase==='done' && (isClean ? 'Bibliothèque nettoyée' : isOrganize ? 'Organisation réussie' : 'Import réussi')}
             </div>
           </div>
           {!isActive && phase!=='done' && (
@@ -880,7 +953,7 @@ function AIOverlay({ state, onConfirm, onClose }) {
         {isActive && (
           <div style={{ marginBottom:20 }}>
             <div style={{ height:8, background:'#f0f0f0', borderRadius:4, overflow:'hidden', marginBottom:8 }}>
-              <div style={{ height:'100%', width:`${pct}%`, background:'linear-gradient(90deg,#5046e4,#7c3aed)', borderRadius:4, transition:'width .3s ease', animation:pct<100?'aiPulse 1.5s ease infinite':undefined }} />
+              <div style={{ height:'100%', width:`${pct}%`, background:barAccent, borderRadius:4, transition:'width .3s ease', animation:pct<100?'aiPulse 1.5s ease infinite':undefined }} />
             </div>
             <div style={{ fontSize:11, color:'#9ca3af', textAlign:'right' }}>{pct}%</div>
           </div>
@@ -917,11 +990,15 @@ function AIOverlay({ state, onConfirm, onClose }) {
           <div style={{ marginBottom:24, padding:'18px', borderRadius:14, background:'#f0fdf4', border:'1px solid #bbf7d0' }}>
             <div style={{ fontSize:24, marginBottom:8, textAlign:'center' }}>✅</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, textAlign:'center' }}>
-              {[
+              {(isClean ? [
+                { label:'Doublons supprimés', value:summary.removed||0 },
+                { label:'Fichiers renommés',  value:summary.renamed||0 },
+                { label:'Fichiers analysés',  value:summary.scanned||0 },
+              ] : [
                 { label: isOrganize ? 'Fichiers organisés' : 'Fichiers importés', value:summary.uploaded||summary.organized||0 },
                 { label:'Dossiers créés',    value:summary.folders||0 },
                 { label:'Ignorés',           value:summary.skipped||0 },
-              ].map(s=>(
+              ]).map(s=>(
                 <div key={s.label}>
                   <div style={{ fontSize:22, fontWeight:900, color:'#059669' }}>{s.value}</div>
                   <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>{s.label}</div>

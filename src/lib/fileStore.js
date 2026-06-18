@@ -192,6 +192,91 @@ export async function autoOrganizeNodes(userId, parentId, fileNodes, classifyFn,
   return { organized: fileNodes.length, folders: Object.keys(groups).length }
 }
 
+// ── Hash de contenu (SHA-256) pour détecter les VRAIS doublons ──────────────
+// Deux fichiers au contenu identique ont le même hash, même si leur nom diffère.
+export async function hashBlob(blob) {
+  const buf = await blob.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// ── Suppression des doublons par contenu identique ──────────────────────────
+// Garde l'exemplaire le plus ancien de chaque groupe, supprime les copies.
+// onProgress({ current, total }) suit l'avancement du hachage.
+export async function dedupeAllNodes(userId, onProgress) {
+  const all   = await backend.list(userId)
+  const files = all.filter(n => n.type === 'file')
+  const byHash = {}
+  let done = 0
+  for (const f of files) {
+    const blob = await backend.getBlob(f.id)
+    if (blob) {
+      try {
+        const h = await hashBlob(blob)
+        ;(byHash[h] ||= []).push(f)
+      } catch { /* blob illisible : ignoré */ }
+    }
+    done++
+    if (onProgress) onProgress({ current: done, total: files.length })
+    if (done % 4 === 0) await new Promise(r => setTimeout(r, 0))
+  }
+
+  let removed = 0
+  const removedNames = []
+  for (const group of Object.values(byHash)) {
+    if (group.length < 2) continue
+    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)) // plus ancien d'abord
+    for (const dup of group.slice(1)) {
+      await backend.deleteBlob(dup.id).catch(() => {})
+      await backend.deleteNode(dup.id)
+      removed++
+      removedNames.push(dup.name)
+    }
+  }
+  return { removed, scanned: files.length, removedNames }
+}
+
+// ── Renommage intelligent en masse : "Catégorie NN.ext" ─────────────────────
+// Numérotation par dossier et par catégorie (Photo Produit 01, 02… Facture 01…).
+// classifyFn(name, ext) → { category }
+const sanitizeForFilename = (s) =>
+  (s || 'Document').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
+
+export async function renameAllNodes(userId, classifyFn, onProgress) {
+  const all   = await backend.list(userId)
+  const files = all.filter(n => n.type === 'file')
+
+  const byParent = {}
+  for (const f of files) (byParent[f.parentId] ||= []).push(f)
+
+  let done = 0, renamed = 0
+  for (const group of Object.values(byParent)) {
+    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    const counters = {}
+    for (const f of group) {
+      const ext = f.ext || extOf(f.name)
+      const { category } = classifyFn(f.name, ext)
+      counters[category] = (counters[category] || 0) + 1
+      const n = String(counters[category]).padStart(2, '0')
+      const newName = `${sanitizeForFilename(category)} ${n}${ext ? '.' + ext : ''}`
+      if (newName !== f.name) {
+        const node = await backend.getNode(f.id)
+        if (node) {
+          node.name = newName
+          node.aiCategory = category
+          node.updatedAt = new Date().toISOString()
+          await backend.putNode(node)
+          renamed++
+        }
+      }
+      done++
+      if (onProgress) onProgress({ current: done, total: files.length })
+    }
+    await new Promise(r => setTimeout(r, 0))
+  }
+  return { renamed, total: files.length }
+}
+
 // ── Renommer / déplacer (dossiers et fichiers) ──────────────────────────
 export async function renameNode(id, name) {
   const node = await backend.getNode(id)
