@@ -225,12 +225,16 @@ export async function hashBlob(blob) {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// ── Suppression des doublons par contenu identique ──────────────────────────
-// Garde l'exemplaire le plus ancien de chaque groupe, supprime les copies.
-// onProgress({ current, total }) suit l'avancement du hachage.
+// ── Suppression des doublons — double stratégie ──────────────────────────────
+// Passe 1 : SHA-256 (contenu octet-pour-octet identique)
+// Passe 2 : nom normalisé + taille exacte (même fichier ré-exporté avec timestamp différent)
+// Garde toujours l'exemplaire le plus ancien de chaque groupe.
 export async function dedupeAllNodes(userId, onProgress) {
   const all   = await backend.list(userId)
   const files = all.filter(n => n.type === 'file')
+  const removedIds = new Set()
+
+  // ── Passe 1 : hash de contenu (SHA-256) ───────────────────────────────────
   const byHash = {}
   let done = 0
   for (const f of files) {
@@ -242,7 +246,7 @@ export async function dedupeAllNodes(userId, onProgress) {
       } catch { /* blob illisible : ignoré */ }
     }
     done++
-    if (onProgress) onProgress({ current: done, total: files.length })
+    if (onProgress) onProgress({ current: done, total: files.length * 2 })
     if (done % 4 === 0) await new Promise(r => setTimeout(r, 0))
   }
 
@@ -250,15 +254,41 @@ export async function dedupeAllNodes(userId, onProgress) {
   const removedNames = []
   for (const group of Object.values(byHash)) {
     if (group.length < 2) continue
-    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)) // plus ancien d'abord
+    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
     for (const dup of group.slice(1)) {
       await backend.deleteBlob(dup.id).catch(() => {})
       await backend.deleteBlob(THUMB_PREFIX + dup.id).catch(() => {})
       await backend.deleteNode(dup.id)
+      removedIds.add(dup.id)
       removed++
       removedNames.push(dup.name)
     }
   }
+
+  // ── Passe 2 : nom normalisé + taille (même fichier ré-exporté) ────────────
+  const normalize = (name) => (name || '').toLowerCase().replace(/\s+/g,'').replace(/[_\-]/g,'')
+  const byNameSize = {}
+  for (const f of files) {
+    if (removedIds.has(f.id)) continue
+    const key = `${normalize(f.name)}::${f.size}`
+    ;(byNameSize[key] ||= []).push(f)
+  }
+  for (const group of Object.values(byNameSize)) {
+    if (group.length < 2) continue
+    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    for (const dup of group.slice(1)) {
+      if (removedIds.has(dup.id)) continue
+      await backend.deleteBlob(dup.id).catch(() => {})
+      await backend.deleteBlob(THUMB_PREFIX + dup.id).catch(() => {})
+      await backend.deleteNode(dup.id)
+      removedIds.add(dup.id)
+      removed++
+      removedNames.push(dup.name)
+    }
+  }
+
+  done = files.length * 2
+  if (onProgress) onProgress({ current: done, total: done })
   return { removed, scanned: files.length, removedNames }
 }
 

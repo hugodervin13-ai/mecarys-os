@@ -159,66 +159,90 @@ export function computeTypeStats(fileNodes) {
 }
 
 // ─── Extraction de texte PDF côté navigateur (sans bibliothèque externe) ────────
-// Fonctionne pour les PDFs générés par logiciels (devis, factures, bons de
-// commande). Les PDFs scannés nécessiteraient un OCR côté serveur.
-// Technique : décode le binaire en latin-1 puis cherche les opérateurs PDF
-// Tj et TJ (text-show) dans les flux de contenu non compressés.
+// Stratégie multi-couches pour maximiser la couverture :
+//   1. Métadonnées du header PDF (/Title, /Subject…)  — très fiable pour PDFs générés
+//   2. Opérateur Tj (string show)                     — flux non compressés
+//   3. Opérateur TJ (array show)                      — flux non compressés
+//   4. Scan direct de mots-clés + références dans le binaire brut (fallback universel)
 export async function extractPdfText(blob) {
   try {
     const buf = await blob.arrayBuffer()
     const raw = new TextDecoder('latin1').decode(new Uint8Array(buf))
-    const texts = []
-    // Opérateur Tj : (texte) Tj
-    const re1 = /\(([^)\\]{1,200}(?:\\.[^)\\]{0,50})*)\)\s*Tj/g
-    let m
-    while ((m = re1.exec(raw)) !== null) {
-      const t = m[1]
-        .replace(/\\n/g,' ').replace(/\\r/g,' ')
-        .replace(/\\\(/g,'(').replace(/\\\)/g,')')
-        .replace(/\\\\/g,'\\').replace(/\s+/g,' ').trim()
-      if (t.length > 1 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.push(t)
+    const texts = new Set()
+
+    // 1. Header metadata
+    for (const key of ['Title', 'Subject', 'Keywords', 'Author', 'Creator']) {
+      const m = raw.match(new RegExp(`/${key}\\s*\\(([^)]{1,200})\\)`))
+      if (m && /[a-zA-Z0-9]/.test(m[1])) texts.add(m[1].trim())
     }
-    // Opérateur TJ : [(texte) -kern (texte)] TJ
-    const re2 = /\[([^\]]{1,1000})\]\s*TJ/g
+
+    // 2. Tj : (texte) Tj
+    let m
+    const re1 = /\(([^)]{1,300})\)\s*Tj/g
+    while ((m = re1.exec(raw)) !== null) {
+      const t = m[1].replace(/\\[nrtf]/g,' ').replace(/\\./g,'').replace(/\s+/g,' ').trim()
+      if (t.length > 1 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.add(t)
+    }
+
+    // 3. TJ : [(texte) kern (texte)] TJ
+    const re2 = /\[([^\]]{1,3000})\]\s*TJ/g
     while ((m = re2.exec(raw)) !== null) {
       const inner = m[1]
-      const re3 = /\(([^)]{1,150})\)/g
+      const re3 = /\(([^)]{1,200})\)/g
       let m2
       while ((m2 = re3.exec(inner)) !== null) {
         const t = m2[1].replace(/\s+/g,' ').trim()
-        if (t.length > 1 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.push(t)
+        if (t.length > 0 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.add(t)
       }
     }
-    return texts.slice(0, 300).join(' ')
+
+    // 4. Scan direct — fonctionne même sur PDFs compressés partiellement :
+    //    on cherche les mots-clés doc et les références dans le binaire brut
+    const kwRe = /\b(DEVIS|FACTURE|INVOICE|BON\s+DE\s+COMMANDE|PURCHASE\s+ORDER|PACKING\s+LIST|CERTIFICAT|CERTIFICATE|PROFORMA|CONTRAT|CONTRACT|BON\s+DE\s+LIVRAISON|DELIVERY\s+NOTE|RECU|RECEIPT)\b/gi
+    while ((m = kwRe.exec(raw)) !== null) texts.add(m[1].trim())
+
+    // Références alphanumériques (WEB-260421-H8W1, INV-2024-001, FAC-42…)
+    const refRe = /\b([A-Z]{2,6}-\d{4,8}-[A-Z0-9]{2,8})\b/g
+    while ((m = refRe.exec(raw)) !== null) texts.add(m[1])
+    const refRe2 = /\b((?:INV|FAC|FACT|CMD|PO|BL|BDC|REF|WEB|DEV)[-_]\d{3,12}(?:[-_][A-Z0-9]{1,8})?)\b/gi
+    while ((m = refRe2.exec(raw)) !== null) texts.add(m[1].toUpperCase())
+
+    return [...texts].join(' ')
   } catch { return '' }
 }
 
 // ─── Parse les métadonnées structurées depuis le texte extrait d'un PDF ─────
 export function parseDocumentMeta(text) {
-  if (!text || text.length < 10) return {}
+  if (!text || text.length < 3) return {}
   const result = {}
 
-  // Type de document (priorité décroissante)
+  // Type de document
   const typeMap = [
-    [/\bDEVIS\b/i,                                        'Devis'],
-    [/\bFACTURE\b|\bINVOICE\b/i,                         'Facture'],
-    [/\bPROFORMA\b/i,                                     'Proforma'],
-    [/\bBON\s+DE\s+COMMANDE\b|\bPURCHASE\s+ORDER\b/i,    'Bon de Commande'],
-    [/\bBON\s+DE\s+LIVRAISON\b|\bDELIVERY\s+NOTE\b/i,    'Bon de Livraison'],
-    [/\bPACKING\s+LIST\b/i,                               'Packing List'],
-    [/\bCERTIFICAT\b|\bCERTIFICATE\b/i,                  'Certificat'],
-    [/\bCONTRAT\b|\bCONTRACT\b/i,                        'Contrat'],
-    [/\bREÇU\b|\bRECEIPT\b/i,                             'Reçu'],
+    [/\bDEVIS\b/i,                                     'Devis'],
+    [/\bFACTURE\b|\bINVOICE\b/i,                      'Facture'],
+    [/\bPROFORMA\b/i,                                  'Proforma'],
+    [/\bBON\s*DE\s*COMMANDE\b|\bPURCHASE\s*ORDER\b/i, 'Bon de Commande'],
+    [/\bBON\s*DE\s*LIVRAISON\b|\bDELIVERY\s*NOTE\b/i, 'Bon de Livraison'],
+    [/\bPACKING\s*LIST\b/i,                            'Packing List'],
+    [/\bCERTIFICAT\b|\bCERTIFICATE\b/i,               'Certificat'],
+    [/\bCONTRAT\b|\bCONTRACT\b/i,                     'Contrat'],
+    [/\bRECU\b|\bRECEIPT\b/i,                         'Reçu'],
   ]
   for (const [re, label] of typeMap) {
     if (re.test(text)) { result.docType = label; break }
   }
 
-  // Référence (WEB-260421-H8W1, INV-2024-001, FAC-0042, etc.)
-  const refM = text.match(/\bRef\.?\s*:?\s*([A-Z]{2,6}[-][\dA-Z]{4,15})\b/i)
-    || text.match(/\b([A-Z]{2,6}[-][\d]{4,8}[-][A-Z0-9]{2,8})\b/)
-    || text.match(/\b((?:INV|FAC|FACT|CMD|PO|WEB|REF|BL|BDC)[-_][\dA-Z]{3,15})\b/i)
-  if (refM) result.ref = (refM[1] || refM[0]).toUpperCase().replace(/^REF\.\s*/i, '')
+  // Référence — plusieurs patterns par ordre de priorité
+  let refM =
+    text.match(/\bRef\.?\s*:?\s*([A-Z]{2,6}-[\dA-Z]{4,15})\b/i) ||
+    text.match(/\b([A-Z]{2,6}-\d{4,8}-[A-Z0-9]{2,8})\b/) ||
+    text.match(/\b((?:INV|FAC|FACT|CMD|PO|BL|BDC|WEB|DEV)-[\dA-Z]{3,15})\b/i) ||
+    text.match(/\b([A-Z]{2,6}-\d{3,10})\b/)
+  if (refM) {
+    result.ref = (refM[1]).toUpperCase()
+    // Dédoublonner le préfixe "REF."
+    result.ref = result.ref.replace(/^REF[-.]?\s*/i, '')
+  }
 
   return result
 }
