@@ -7,7 +7,8 @@ import Modal from '../components/Modal'
 import ContextMenu from '../components/ContextMenu'
 import FilePreview from '../components/FilePreview'
 import {
-  listNodes, createFolder, updateFolder, uploadFiles, uploadWithAIOrganize,
+  listNodes, createFolder, findOrCreateFolder, mergeDuplicateFolders,
+  updateFolder, uploadFiles, uploadWithAIOrganize,
   autoOrganizeNodes, updateNodeMeta, renameNode, moveNode, deleteNode,
   downloadFile, getFileUrl, getThumbUrl, getBlobById, folderStats, descendantIds, kindOf, extOf, formatSize,
   dedupeAllNodes, renameAllNodes,
@@ -17,6 +18,7 @@ import {
   classifyFile, extractMeta, analyzeFiles, groupByCategory,
   computeTypeStats, CATEGORIES,
   extractPdfText, parseDocumentMeta, buildSmartName,
+  SMART_LABELS, getSmartName,
 } from '../lib/docAI'
 
 // ─── Helpers visuels ────────────────────────────────────────────────────────
@@ -59,22 +61,13 @@ const generateRenameSugs = (node, siblings) => {
   const clean = base.trim().replace(/[_]+/g, ' ').replace(/\s+/g, ' ').replace(/^(.)/, c => c.toUpperCase())
   if (clean + ext !== node.name) sugs.add(clean + ext)
 
-  // 3. Suggestion basée sur la catégorie IA
+  // 3. Suggestion basée sur la catégorie IA (labels intelligents + imageHint)
   if (node.aiCategory) {
     const cat = node.aiCategory
     const samecat = siblings.filter(s => s.aiCategory === cat && s.id !== node.id).length + 1
     const n = String(samecat).padStart(2, '0')
-    const labels = {
-      'Photos Produit': `Photo Produit ${n}`,
-      'Photos Packaging': `Packaging ${n}`,
-      'Avant / Après': `Avant-Après ${n}`,
-      'Vidéos': `Vidéo Produit ${n}`,
-      'Factures': `Facture ${n}`,
-      'Certificats': `Certificat ${n}`,
-      'Fiches de Sécurité': `Fiche Sécurité ${n}`,
-      'Notices': `Notice ${n}`,
-    }
-    if (labels[cat]) sugs.add(labels[cat] + ext)
+    const smartLabel = getSmartName(cat, samecat, node)
+    sugs.add(smartLabel + ext)
   }
 
   // 4. Nom horodaté (utile pour factures/certifs)
@@ -316,7 +309,7 @@ export default function Documents() {
         const groups = ai.groups
         const folderIds = {}
         for (const cat of Object.keys(groups)) {
-          const folder = await createFolder(user.id, { name:cat, parentId:currentParentId||null })
+          const folder = await findOrCreateFolder(user.id, cat, currentParentId || null)
           folderIds[cat] = folder.id
         }
         let done = 0
@@ -345,20 +338,26 @@ export default function Documents() {
     } catch(e) { toast(e.message); setAI(AI_IDLE) }
   }
 
-  // ── 🤖 Nettoyage complet : dédoublonnage + renommage de TOUTE la bibliothèque ──
+  // ── 🤖 Nettoyage complet : fusion dossiers + dédup + renommage ─────────────
   const handleCleanAll = async () => {
     setCleanConfirm(false)
     const allFiles = nodes.filter(n => n.type === 'file')
     if (!allFiles.length) { toast('Aucun fichier à nettoyer'); return }
     try {
-      // Étape 1 — supprimer les doublons par contenu identique
+      // Étape 0 — fusionner les dossiers en double (même nom, même parent)
+      setAI(AI_CLEAN('Fusion des dossiers en double…', 0))
+      await mergeDuplicateFolders(user.id)
+
+      // Étape 1 — supprimer les doublons de fichiers
       setAI(AI_CLEAN('Recherche des doublons identiques…', allFiles.length))
       const dedup = await dedupeAllNodes(user.id, ({current,total}) =>
         setAI(s => ({...s, progress:current/total, current, total}))
       )
-      // Étape 2 — renommer chaque fichier (Catégorie NN.ext, ou nom extrait du contenu PDF)
+
+      // Étape 2 — renommer avec labels intelligents + contenu PDF
       const remaining = allFiles.length - dedup.removed
       setAI(AI_CLEAN('Renommage intelligent des fichiers…', remaining))
+
       const getPdfName = async (blob, node) => {
         const text = await extractPdfText(blob)
         if (!text) return null
@@ -367,9 +366,14 @@ export default function Documents() {
         if (name) await updateNodeMeta(node.id, { aiMetadata: meta }).catch(() => {})
         return name
       }
+
+      const getNameFn = (category, counter, node) =>
+        getSmartName(category, Number(counter), node?.aiMetadata ? node : undefined)
+
       const ren = await renameAllNodes(user.id, classifyFile, ({current,total}) =>
         setAI(s => ({...s, progress:current/total, current, total})),
-        getPdfName
+        getPdfName,
+        getNameFn
       )
       await load()
       setAI({ phase:'done', mode:'clean', summary:{ removed:dedup.removed, renamed:ren.renamed, scanned:dedup.scanned } })

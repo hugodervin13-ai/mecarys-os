@@ -20,6 +20,69 @@
 
 import { extOf, kindOf } from './fileStore'
 
+// ─── Labels d'affichage intelligents (catégorie → nom de fichier) ─────────────
+// Remplace le nom brut de catégorie par un label lisible et précis.
+export const SMART_LABELS = {
+  'Photos Produit':     'Photo Produit',
+  'Photos Packaging':   'Packaging',
+  'Avant / Après':      'Avant-Après',
+  'Vidéos':             'Vidéo',
+  'Factures':           'Facture',
+  'Certificats':        'Certificat',
+  'Fiches de Sécurité': 'Fiche Sécurité',
+  'Notices':            'Manuel Utilisation',
+  'Amazon':             'Visuel Amazon',
+  'Logistique':         'Doc Logistique',
+  'Marketing':          'Visuel Marketing',
+  'Documents':          'Document',
+}
+
+// Retourne le nom affiché pour un fichier, en tenant compte des métadonnées IA
+// (imageHint permet de distinguer Logo / Lifestyle / Bannière dans les photos produit)
+export function getSmartName(category, counter, node) {
+  const n = String(counter).padStart(2, '0')
+  const hint = node?.aiMetadata?.imageHint
+
+  if (category === 'Photos Produit') {
+    if (hint === 'logo')        return `Logo ${n}`
+    if (hint === 'lifestyle')   return `Photo Lifestyle ${n}`
+    if (hint === 'banner')      return `Bannière ${n}`
+    if (hint === 'infographie') return `Infographie ${n}`
+  }
+
+  return `${SMART_LABELS[category] || category} ${n}`
+}
+
+// ─── Analyse de contenu image (sans API externe) ──────────────────────────────
+// Couche 1 : mots-clés dans le nom de fichier (rapide, toujours exécutée)
+// Couche 2 : analyse des dimensions via createImageBitmap (logos = petit carré,
+//            bannières = très large, infographies = très haut)
+export async function analyzeImageHint(blob, filename) {
+  const name = (filename || '').toLowerCase()
+
+  // Mots-clés dans le nom
+  if (/\blogo\b|\bicon\b|\bicone\b|\bmarque\b|\bbrand\b/.test(name))      return 'logo'
+  if (/\blifestyle\b|\bambiance\b|\bmodele\b|\bmodel\b/.test(name))        return 'lifestyle'
+  if (/\bbanner\b|\bbanniere\b|\bbandeau\b/.test(name))                    return 'banner'
+  if (/\binfograph\b/.test(name))                                           return 'infographie'
+  if (/\bpackag\b|\bemball\b|\bbox\b|\bboite\b|\bsleeve\b/.test(name))     return 'packaging'
+  if (/\bavant\b|\bbefore\b|\bafter\b|\bapres\b|\bcompar\b/.test(name))    return 'avantapres'
+
+  // Analyse des dimensions
+  try {
+    const bitmap = await createImageBitmap(blob)
+    const { width, height } = bitmap
+    if (bitmap.close) bitmap.close()
+    const ratio = width / height
+    const maxDim = Math.max(width, height)
+    if (maxDim <= 500 && ratio > 0.75 && ratio < 1.35) return 'logo'
+    if (ratio >= 2.5)  return 'banner'
+    if (ratio <= 0.4)  return 'infographie'
+  } catch { /* format non supporté par createImageBitmap (ex: HEIC) */ }
+
+  return null
+}
+
 // ─── Catalogue de catégories ──────────────────────────────────────────────────
 export const CATEGORIES = {
   'Photos Produit':     { icon: '🖼️',  color: '#6366f1', desc: 'Photos du produit fini' },
@@ -108,6 +171,20 @@ export async function analyzeFiles(fileObjects, onProgress) {
     const ext = extOf(f.name)
     const { category, confidence, method } = classifyFile(f.name, ext)
     const metadata = extractMeta(f.name, category)
+
+    // ── Analyse contenu image (dimensions + mots-clés nom) ───────────────
+    if (kindOf(ext) === 'image') {
+      try {
+        const hint = await analyzeImageHint(f, f.name)
+        if (hint) {
+          metadata.imageHint = hint
+          // Reclasser si l'indice contredit la classification par défaut
+          if (hint === 'packaging' && category === 'Photos Produit') {
+            // laisser tel quel — la catégorie reste cohérente
+          }
+        }
+      } catch { /* pas bloquant */ }
+    }
 
     // ── Hook IA optionnel (désactivé par défaut) ─────────────────────────
     // if (AI_HOOKS.vision && kindOf(ext) === 'image') {

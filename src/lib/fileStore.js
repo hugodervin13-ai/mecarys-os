@@ -151,9 +151,54 @@ export async function updateNodeMeta(id, meta) {
   return backend.putNode(node)
 }
 
+// ── Trouver ou créer un dossier (évite les doublons de dossiers) ─────────────
+// Si un dossier avec le même nom (insensible à la casse) existe déjà au même
+// niveau, le retourne directement au lieu d'en créer un nouveau.
+export async function findOrCreateFolder(userId, name, parentId) {
+  const all = await backend.list(userId)
+  const existing = all.find(n =>
+    n.type === 'folder' &&
+    n.userId === userId &&
+    n.parentId === (parentId || null) &&
+    n.name.toLowerCase() === (name || '').toLowerCase()
+  )
+  return existing || createFolder(userId, { name, parentId })
+}
+
+// ── Fusion des dossiers en double (même nom, même parent) ───────────────────
+// Déplace tous les enfants du doublon dans le dossier original (le plus ancien),
+// puis supprime le doublon vide.
+export async function mergeDuplicateFolders(userId) {
+  const all = await backend.list(userId)
+  const folders = all.filter(n => n.type === 'folder' && n.userId === userId)
+
+  const byKey = {}
+  for (const f of folders) {
+    const key = `${f.parentId || 'root'}::${(f.name || '').toLowerCase().trim()}`
+    ;(byKey[key] ||= []).push(f)
+  }
+
+  let merged = 0
+  for (const group of Object.values(byKey)) {
+    if (group.length < 2) continue
+    group.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    const keeper = group[0]
+    for (const dupe of group.slice(1)) {
+      const children = all.filter(n => n.parentId === dupe.id)
+      for (const child of children) {
+        const node = await backend.getNode(child.id)
+        if (node) { node.parentId = keeper.id; node.updatedAt = new Date().toISOString(); await backend.putNode(node) }
+      }
+      await backend.deleteNode(dupe.id)
+      merged++
+    }
+  }
+  return { merged }
+}
+
 // ── Import de dossier avec organisation IA ──────────────────────────────────
 // Prend les résultats d'analyzeFiles() (chaque entrée a { file, category })
-// et crée les sous-dossiers de catégorie dans parentId avant d'uploader.
+// et crée (ou réutilise) les sous-dossiers de catégorie avant d'uploader.
 // onProgress({ current, total }) est appelé à chaque fichier uploadé.
 export async function uploadWithAIOrganize(userId, parentId, analysisResults, onProgress) {
   const groups = {}
@@ -161,14 +206,12 @@ export async function uploadWithAIOrganize(userId, parentId, analysisResults, on
     ;(groups[r.category] ||= []).push(r)
   }
 
-  // Créer les dossiers de catégorie
   const folderIds = {}
   for (const cat of Object.keys(groups)) {
-    const folder = await createFolder(userId, { name: cat, parentId: parentId || null })
+    const folder = await findOrCreateFolder(userId, cat, parentId || null)
     folderIds[cat] = folder.id
   }
 
-  // Uploader les fichiers
   let done = 0, uploaded = 0, skipped = 0
   const all = Object.values(groups).flat()
 
@@ -199,7 +242,7 @@ export async function autoOrganizeNodes(userId, parentId, fileNodes, classifyFn,
 
   const folderIds = {}
   for (const cat of Object.keys(groups)) {
-    const folder = await createFolder(userId, { name: cat, parentId: parentId || null })
+    const folder = await findOrCreateFolder(userId, cat, parentId || null)
     folderIds[cat] = folder.id
   }
 
@@ -297,14 +340,14 @@ export async function getBlobById(id) {
   return backend.getBlob(id)
 }
 
-// ── Renommage intelligent en masse : "Catégorie NN.ext" ─────────────────────
-// Numérotation par dossier et par catégorie (Photo Produit 01, 02… Facture 01…).
+// ── Renommage intelligent en masse ───────────────────────────────────────────
 // classifyFn(name, ext) → { category }
-// getPdfNameFn(blob, node) → Promise<string|null> — nom alternatif pour PDFs non classifiés
+// getPdfNameFn(blob, node) → Promise<string|null> — nom depuis contenu PDF
+// getNameFn(category, counter, node) → string — label affiché (ex: "Photo Produit")
 const sanitizeForFilename = (s) =>
   (s || 'Document').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
 
-export async function renameAllNodes(userId, classifyFn, onProgress, getPdfNameFn = null) {
+export async function renameAllNodes(userId, classifyFn, onProgress, getPdfNameFn = null, getNameFn = null) {
   const all   = await backend.list(userId)
   const files = all.filter(n => n.type === 'file')
 
@@ -321,18 +364,19 @@ export async function renameAllNodes(userId, classifyFn, onProgress, getPdfNameF
 
       let newName = null
 
-      // Pour les PDFs classés générique « Documents », essayer l'extraction de contenu
+      // PDFs sans classification spécifique : extraire le contenu
       if (getPdfNameFn && ext === 'pdf' && category === 'Documents') {
         try {
           const blob = await backend.getBlob(f.id)
           if (blob) newName = await getPdfNameFn(blob, f)
-        } catch { /* ignoré : utilise le nom générique */ }
+        } catch { /* ignoré */ }
       }
 
       if (!newName) {
         counters[category] = (counters[category] || 0) + 1
         const n = String(counters[category]).padStart(2, '0')
-        newName = `${sanitizeForFilename(category)} ${n}${ext ? '.' + ext : ''}`
+        const label = getNameFn ? getNameFn(category, n, f) : `${category} ${n}`
+        newName = `${sanitizeForFilename(label)}${ext ? '.' + ext : ''}`
       }
 
       if (newName !== f.name) {
