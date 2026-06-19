@@ -125,8 +125,9 @@ export default function Documents() {
   const [ai, setAI] = useState(AI_IDLE)
 
   // ── Refs ────────────────────────────────────────────────────────────────
-  const fileInputRef   = useRef(null)
-  const folderInputRef = useRef(null)
+  const fileInputRef    = useRef(null)
+  const folderInputRef  = useRef(null)
+  const autoMergedRef   = useRef(false)
 
   // webkitdirectory doit être posé en impératif (pas supporté comme prop JSX en React 19)
   useEffect(() => {
@@ -135,6 +136,25 @@ export default function Documents() {
       folderInputRef.current.setAttribute('directory', '')
     }
   }, [])
+
+  // Auto-fusion silencieuse des dossiers en double au premier chargement
+  useEffect(() => {
+    if (!user || nodes.length === 0 || autoMergedRef.current) return
+    // Détection rapide : même clé parentId::nom parmi les dossiers
+    const seen = new Set()
+    let hasDupes = false
+    for (const n of nodes) {
+      if (n.type !== 'folder') continue
+      const key = `${n.parentId ?? 'root'}::${(n.name || '').toLowerCase().trim()}`
+      if (seen.has(key)) { hasDupes = true; break }
+      seen.add(key)
+    }
+    if (!hasDupes) { autoMergedRef.current = true; return }
+    autoMergedRef.current = true
+    mergeDuplicateFolders(user.id).then(() => {
+      listNodes(user.id).then(res => setNodes(res || [])).catch(() => {})
+    }).catch(() => {})
+  }, [nodes, user])
 
   // Extraction de texte PDF en arrière-plan quand la modale de renommage s'ouvre
   useEffect(() => {
