@@ -274,11 +274,11 @@ export default function Dashboard() {
             onMouseLeave={e=>{ e.currentTarget.style.transform='none'; e.currentTarget.style.boxShadow='0 1px 3px rgba(0,0,0,0.05)' }}
           >
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-              <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.07em' }}>{k.label}</span>
-              <div style={{ width:32, height:32, borderRadius:9, background:`${k.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:15 }}>{k.icon}</div>
+              <span style={{ fontSize:12, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.06em' }}>{k.label}</span>
+              <div style={{ width:34, height:34, borderRadius:10, background:`${k.color}12`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>{k.icon}</div>
             </div>
-            <div style={{ fontSize:30, fontWeight:900, color:'#111827', letterSpacing:'-0.5px', lineHeight:1 }}>{k.value}</div>
-            <div style={{ fontSize:11, color:k.color, fontWeight:600, marginTop:6 }}>{k.sub}</div>
+            <div style={{ fontSize:32, fontWeight:900, color:'#111827', letterSpacing:'-0.8px', lineHeight:1 }}>{k.value}</div>
+            <div style={{ fontSize:12, color:k.color, fontWeight:600, marginTop:7 }}>{k.sub}</div>
           </div>
         ))}
       </div>
@@ -287,8 +287,11 @@ export default function Dashboard() {
       <div style={{ background:'#fff', borderRadius:20, padding:'24px 28px', boxShadow:'0 1px 3px rgba(0,0,0,0.05)', border:'1px solid #f0f0f0' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
           <div>
-            <div style={{ fontSize:15, fontWeight:700, color:'#111827' }}>Pipeline logistique</div>
-            <div style={{ fontSize:12, color:'#9ca3af', marginTop:2 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:20 }}>🚢</span>
+              <span style={{ fontSize:18, fontWeight:800, color:'#111827', letterSpacing:'-0.4px' }}>Pipeline logistique</span>
+            </div>
+            <div style={{ fontSize:12, color:'#9ca3af', marginTop:4, marginLeft:28 }}>
               {shipments.length===0
                 ? 'Aucune expédition — créez-en une pour démarrer'
                 : `${shipments.length} expédition${shipments.length>1?'s':''} · ${formatNumber(totalItems)} unités au total`}
@@ -330,7 +333,7 @@ export default function Dashboard() {
         {/* Liste des expéditions actives */}
         {activeShipments.length>0 && (
           <div style={{ marginTop:20, borderTop:'1.5px solid #f5f4f0', paddingTop:16 }}>
-            <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.09em', marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'#374151', marginBottom:10, letterSpacing:'-0.1px' }}>
               Expéditions actives
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
@@ -385,10 +388,13 @@ export default function Dashboard() {
 
         {/* ALERTES */}
         <div style={{ background:'#fff', borderRadius:18, padding:'20px 22px', boxShadow:'0 1px 3px rgba(0,0,0,0.05)', border:'1px solid #f0f0f0', display:'flex', flexDirection:'column' }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-            <div style={{ fontSize:14, fontWeight:700, color:'#111827' }}>Alertes</div>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+              <span style={{ fontSize:18 }}>⚠️</span>
+              <span style={{ fontSize:17, fontWeight:800, color:'#111827', letterSpacing:'-0.3px' }}>Alertes</span>
+            </div>
             {allAlerts.length>0 && (
-              <span style={{ fontSize:11, fontWeight:800, padding:'2px 9px', borderRadius:20, background: allAlerts.some(a=>a.severity==='critical')?'#fee2e2':'#fef3c7', color: allAlerts.some(a=>a.severity==='critical')?'#dc2626':'#d97706' }}>
+              <span style={{ fontSize:12, fontWeight:800, padding:'3px 10px', borderRadius:20, background: allAlerts.some(a=>a.severity==='critical')?'#fee2e2':'#fef3c7', color: allAlerts.some(a=>a.severity==='critical')?'#dc2626':'#d97706' }}>
                 {allAlerts.length}
               </span>
             )}
@@ -424,7 +430,10 @@ export default function Dashboard() {
 
         {/* NOTES */}
         <div style={{ background:'#fff', borderRadius:18, padding:'20px 22px', boxShadow:'0 1px 3px rgba(0,0,0,0.05)', border:'1px solid #f0f0f0', display:'flex', flexDirection:'column' }}>
-          <div style={{ fontSize:14, fontWeight:700, color:'#111827', marginBottom:14 }}>Notes rapides</div>
+          <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:16 }}>
+            <span style={{ fontSize:18 }}>📝</span>
+            <span style={{ fontSize:17, fontWeight:800, color:'#111827', letterSpacing:'-0.3px' }}>Notes rapides</span>
+          </div>
 
           {/* Input */}
           <div style={{ display:'flex', gap:8, marginBottom:14 }}>
@@ -481,7 +490,10 @@ export default function Dashboard() {
 
         {/* RACCOURCIS */}
         <div style={{ background:'#fff', borderRadius:18, padding:'20px 22px', boxShadow:'0 1px 3px rgba(0,0,0,0.05)', border:'1px solid #f0f0f0' }}>
-          <div style={{ fontSize:14, fontWeight:700, color:'#111827', marginBottom:14 }}>Accès rapide</div>
+          <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:16 }}>
+            <span style={{ fontSize:18 }}>⚡</span>
+            <span style={{ fontSize:17, fontWeight:800, color:'#111827', letterSpacing:'-0.3px' }}>Accès rapide</span>
+          </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
             {SHORTCUTS.map(s=>(
               <button key={s.label} onClick={()=>navigate(s.to)} style={{
