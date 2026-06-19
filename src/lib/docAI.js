@@ -158,6 +158,81 @@ export function computeTypeStats(fileNodes) {
   return counts
 }
 
+// ─── Extraction de texte PDF côté navigateur (sans bibliothèque externe) ────────
+// Fonctionne pour les PDFs générés par logiciels (devis, factures, bons de
+// commande). Les PDFs scannés nécessiteraient un OCR côté serveur.
+// Technique : décode le binaire en latin-1 puis cherche les opérateurs PDF
+// Tj et TJ (text-show) dans les flux de contenu non compressés.
+export async function extractPdfText(blob) {
+  try {
+    const buf = await blob.arrayBuffer()
+    const raw = new TextDecoder('latin1').decode(new Uint8Array(buf))
+    const texts = []
+    // Opérateur Tj : (texte) Tj
+    const re1 = /\(([^)\\]{1,200}(?:\\.[^)\\]{0,50})*)\)\s*Tj/g
+    let m
+    while ((m = re1.exec(raw)) !== null) {
+      const t = m[1]
+        .replace(/\\n/g,' ').replace(/\\r/g,' ')
+        .replace(/\\\(/g,'(').replace(/\\\)/g,')')
+        .replace(/\\\\/g,'\\').replace(/\s+/g,' ').trim()
+      if (t.length > 1 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.push(t)
+    }
+    // Opérateur TJ : [(texte) -kern (texte)] TJ
+    const re2 = /\[([^\]]{1,1000})\]\s*TJ/g
+    while ((m = re2.exec(raw)) !== null) {
+      const inner = m[1]
+      const re3 = /\(([^)]{1,150})\)/g
+      let m2
+      while ((m2 = re3.exec(inner)) !== null) {
+        const t = m2[1].replace(/\s+/g,' ').trim()
+        if (t.length > 1 && /[a-zA-ZÀ-ÿ0-9]/.test(t)) texts.push(t)
+      }
+    }
+    return texts.slice(0, 300).join(' ')
+  } catch { return '' }
+}
+
+// ─── Parse les métadonnées structurées depuis le texte extrait d'un PDF ─────
+export function parseDocumentMeta(text) {
+  if (!text || text.length < 10) return {}
+  const result = {}
+
+  // Type de document (priorité décroissante)
+  const typeMap = [
+    [/\bDEVIS\b/i,                                        'Devis'],
+    [/\bFACTURE\b|\bINVOICE\b/i,                         'Facture'],
+    [/\bPROFORMA\b/i,                                     'Proforma'],
+    [/\bBON\s+DE\s+COMMANDE\b|\bPURCHASE\s+ORDER\b/i,    'Bon de Commande'],
+    [/\bBON\s+DE\s+LIVRAISON\b|\bDELIVERY\s+NOTE\b/i,    'Bon de Livraison'],
+    [/\bPACKING\s+LIST\b/i,                               'Packing List'],
+    [/\bCERTIFICAT\b|\bCERTIFICATE\b/i,                  'Certificat'],
+    [/\bCONTRAT\b|\bCONTRACT\b/i,                        'Contrat'],
+    [/\bREÇU\b|\bRECEIPT\b/i,                             'Reçu'],
+  ]
+  for (const [re, label] of typeMap) {
+    if (re.test(text)) { result.docType = label; break }
+  }
+
+  // Référence (WEB-260421-H8W1, INV-2024-001, FAC-0042, etc.)
+  const refM = text.match(/\bRef\.?\s*:?\s*([A-Z]{2,6}[-][\dA-Z]{4,15})\b/i)
+    || text.match(/\b([A-Z]{2,6}[-][\d]{4,8}[-][A-Z0-9]{2,8})\b/)
+    || text.match(/\b((?:INV|FAC|FACT|CMD|PO|WEB|REF|BL|BDC)[-_][\dA-Z]{3,15})\b/i)
+  if (refM) result.ref = (refM[1] || refM[0]).toUpperCase().replace(/^REF\.\s*/i, '')
+
+  return result
+}
+
+// ─── Construit un nom de fichier propre depuis les métadonnées parsées ───────
+export function buildSmartName(meta, ext = '') {
+  const parts = []
+  if (meta.docType) parts.push(meta.docType)
+  if (meta.ref)     parts.push(meta.ref)
+  if (!parts.length) return null
+  const dotExt = ext ? (ext.startsWith('.') ? ext : `.${ext}`) : ''
+  return parts.join(' - ').replace(/[/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim() + dotExt
+}
+
 // ─── Stubs providers IA (à implémenter) ──────────────────────────────────────
 // Brancher un provider ici suffit — l'UI ne change pas.
 export const AI_HOOKS = {

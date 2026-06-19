@@ -9,13 +9,14 @@ import FilePreview from '../components/FilePreview'
 import {
   listNodes, createFolder, updateFolder, uploadFiles, uploadWithAIOrganize,
   autoOrganizeNodes, updateNodeMeta, renameNode, moveNode, deleteNode,
-  downloadFile, getFileUrl, getThumbUrl, folderStats, descendantIds, kindOf, extOf, formatSize,
+  downloadFile, getFileUrl, getThumbUrl, getBlobById, folderStats, descendantIds, kindOf, extOf, formatSize,
   dedupeAllNodes, renameAllNodes,
   ACCEPT_ATTR, ACCEPTED_EXT,
 } from '../lib/fileStore'
 import {
   classifyFile, extractMeta, analyzeFiles, groupByCategory,
   computeTypeStats, CATEGORIES,
+  extractPdfText, parseDocumentMeta, buildSmartName,
 } from '../lib/docAI'
 
 // ─── Helpers visuels ────────────────────────────────────────────────────────
@@ -47,11 +48,18 @@ const generateRenameSugs = (node, siblings) => {
   const base = node.name.replace(/\.[^.]+$/, '')
   const sugs = new Set()
 
-  // 1. Nom nettoyé : underscores → espaces, majuscule initiale
+  // 1. Suggestion depuis le contenu PDF déjà extrait (priorité maximale)
+  if (node.aiMetadata?.docType) {
+    const parts = [node.aiMetadata.docType]
+    if (node.aiMetadata.ref) parts.push(node.aiMetadata.ref)
+    sugs.add(parts.join(' - ') + ext)
+  }
+
+  // 2. Nom nettoyé : underscores → espaces, majuscule initiale
   const clean = base.trim().replace(/[_]+/g, ' ').replace(/\s+/g, ' ').replace(/^(.)/, c => c.toUpperCase())
   if (clean + ext !== node.name) sugs.add(clean + ext)
 
-  // 2. Suggestion basée sur la catégorie IA
+  // 3. Suggestion basée sur la catégorie IA
   if (node.aiCategory) {
     const cat = node.aiCategory
     const samecat = siblings.filter(s => s.aiCategory === cat && s.id !== node.id).length + 1
@@ -69,7 +77,7 @@ const generateRenameSugs = (node, siblings) => {
     if (labels[cat]) sugs.add(labels[cat] + ext)
   }
 
-  // 3. Nom horodaté (utile pour factures/certifs)
+  // 4. Nom horodaté (utile pour factures/certifs)
   const today = new Date().toLocaleDateString('fr-FR').replace(/\//g, '-')
   if (node.aiCategory === 'Factures' || node.aiCategory === 'Certificats') {
     sugs.add(`${clean} - ${today}${ext}`)
@@ -134,6 +142,29 @@ export default function Documents() {
       folderInputRef.current.setAttribute('directory', '')
     }
   }, [])
+
+  // Extraction de texte PDF en arrière-plan quand la modale de renommage s'ouvre
+  useEffect(() => {
+    if (!renameModal || renameModal.type !== 'file') return
+    const nodeExt = renameModal.ext || extOf(renameModal.name)
+    if (nodeExt !== 'pdf') return
+    let alive = true
+    ;(async () => {
+      try {
+        const blob = await getBlobById(renameModal.id)
+        if (!alive || !blob) return
+        const text = await extractPdfText(blob)
+        if (!alive || !text) return
+        const meta = parseDocumentMeta(text)
+        const smartName = buildSmartName(meta, nodeExt)
+        if (!alive || !smartName) return
+        setRenameSugs(prev => [smartName, ...prev.filter(s => s !== smartName)].slice(0, 4))
+        // Persiste les métadonnées sur le node pour les prochaines ouvertures
+        await updateNodeMeta(renameModal.id, { aiMetadata: { ...meta } }).catch(() => {})
+      } catch { /* ignoré */ }
+    })()
+    return () => { alive = false }
+  }, [renameModal?.id])
 
   // ── Chargement ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -325,11 +356,20 @@ export default function Documents() {
       const dedup = await dedupeAllNodes(user.id, ({current,total}) =>
         setAI(s => ({...s, progress:current/total, current, total}))
       )
-      // Étape 2 — renommer chaque fichier (Catégorie NN.ext)
+      // Étape 2 — renommer chaque fichier (Catégorie NN.ext, ou nom extrait du contenu PDF)
       const remaining = allFiles.length - dedup.removed
       setAI(AI_CLEAN('Renommage intelligent des fichiers…', remaining))
+      const getPdfName = async (blob, node) => {
+        const text = await extractPdfText(blob)
+        if (!text) return null
+        const meta = parseDocumentMeta(text)
+        const name = buildSmartName(meta, node.ext || 'pdf')
+        if (name) await updateNodeMeta(node.id, { aiMetadata: meta }).catch(() => {})
+        return name
+      }
       const ren = await renameAllNodes(user.id, classifyFile, ({current,total}) =>
-        setAI(s => ({...s, progress:current/total, current, total}))
+        setAI(s => ({...s, progress:current/total, current, total})),
+        getPdfName
       )
       await load()
       setAI({ phase:'done', mode:'clean', summary:{ removed:dedup.removed, renamed:ren.renamed, scanned:dedup.scanned } })

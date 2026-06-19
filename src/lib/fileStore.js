@@ -262,13 +262,19 @@ export async function dedupeAllNodes(userId, onProgress) {
   return { removed, scanned: files.length, removedNames }
 }
 
+// ── Accès direct à un blob (pour extraction de contenu côté UI) ─────────────
+export async function getBlobById(id) {
+  return backend.getBlob(id)
+}
+
 // ── Renommage intelligent en masse : "Catégorie NN.ext" ─────────────────────
 // Numérotation par dossier et par catégorie (Photo Produit 01, 02… Facture 01…).
 // classifyFn(name, ext) → { category }
+// getPdfNameFn(blob, node) → Promise<string|null> — nom alternatif pour PDFs non classifiés
 const sanitizeForFilename = (s) =>
   (s || 'Document').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
 
-export async function renameAllNodes(userId, classifyFn, onProgress) {
+export async function renameAllNodes(userId, classifyFn, onProgress, getPdfNameFn = null) {
   const all   = await backend.list(userId)
   const files = all.filter(n => n.type === 'file')
 
@@ -282,9 +288,23 @@ export async function renameAllNodes(userId, classifyFn, onProgress) {
     for (const f of group) {
       const ext = f.ext || extOf(f.name)
       const { category } = classifyFn(f.name, ext)
-      counters[category] = (counters[category] || 0) + 1
-      const n = String(counters[category]).padStart(2, '0')
-      const newName = `${sanitizeForFilename(category)} ${n}${ext ? '.' + ext : ''}`
+
+      let newName = null
+
+      // Pour les PDFs classés générique « Documents », essayer l'extraction de contenu
+      if (getPdfNameFn && ext === 'pdf' && category === 'Documents') {
+        try {
+          const blob = await backend.getBlob(f.id)
+          if (blob) newName = await getPdfNameFn(blob, f)
+        } catch { /* ignoré : utilise le nom générique */ }
+      }
+
+      if (!newName) {
+        counters[category] = (counters[category] || 0) + 1
+        const n = String(counters[category]).padStart(2, '0')
+        newName = `${sanitizeForFilename(category)} ${n}${ext ? '.' + ext : ''}`
+      }
+
       if (newName !== f.name) {
         const node = await backend.getNode(f.id)
         if (node) {
