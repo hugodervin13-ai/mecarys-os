@@ -333,7 +333,7 @@ export default function Documents() {
       )
       await load()
       setAI({ phase:'done', mode:'clean', summary:{ removed:dedup.removed, renamed:ren.renamed, scanned:dedup.scanned } })
-    } catch(e) { toast(e.message); setAI(AI_IDLE) }
+    } catch(e) { toast(e?.message || 'Erreur lors du nettoyage'); setAI(AI_IDLE) }
   }
 
   // ── Analyser les fichiers déjà présents dans le dossier courant ──────────
@@ -838,35 +838,26 @@ function GridCard({ node, stat, onOpen, onMenu }) {
   const baseColor = isF ? '#5046e4' : fileColor(node.name)
 
   const [thumbUrl, setThumbUrl] = useState(null)
-  const [visible,  setVisible]  = useState(false)
-  const cardRef = useRef(null)
 
-  // Ne déclencher le chargement que lorsque la carte approche de l'écran.
   useEffect(() => {
-    if (!isImg || visible) return
-    const el = cardRef.current
-    if (!el) return
-    const io = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) { setVisible(true); io.disconnect() }
-    }, { rootMargin: '300px' })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [isImg, visible])
-
-  // Charger le blob uniquement une fois la carte visible.
-  useEffect(() => {
-    if (!isImg || !visible) return
-    let revoke, alive = true
-    getThumbUrl(node.id).then(url => {
-      if (!url) return
-      if (alive) { setThumbUrl(url); revoke = url }
-      else URL.revokeObjectURL(url)
-    })
-    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke) }
-  }, [node.id, isImg, visible])
+    if (!isImg) return
+    let alive = true
+    let blobUrl = null
+    getThumbUrl(node.id)
+      .then(url => {
+        if (!alive || !url) return
+        blobUrl = url
+        setThumbUrl(url)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [node.id, isImg])
 
   return (
-    <div ref={cardRef} className="doc-card" onClick={onOpen} onContextMenu={onMenu}
+    <div className="doc-card" onClick={onOpen} onContextMenu={onMenu}
       style={{ background:'#fff', border:'1.5px solid #ebebE6', borderRadius:16, overflow:'hidden', position:'relative', display:'flex', flexDirection:'column', animation:'docPop .15s ease' }}>
 
       {/* Menu button */}
@@ -876,12 +867,12 @@ function GridCard({ node, stat, onOpen, onMenu }) {
         onMouseLeave={e=>(e.currentTarget.style.opacity='0')}
       >⋯</button>
 
-      {/* Zone image (si image avec thumb chargé) */}
+      {/* Zone image */}
       {isImg ? (
         <div style={{ width:'100%', aspectRatio:'4/3', background:`${baseColor}10`, overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
           {thumbUrl
-            ? <img src={thumbUrl} alt={node.name} loading="lazy" decoding="async" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-            : <span style={{ fontSize:32, opacity:0.4 }}>🖼️</span>
+            ? <img src={thumbUrl} alt={node.name} decoding="async" style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
+            : <span style={{ fontSize:32, opacity:0.3, animation:'aiPulse 2s ease infinite' }}>🖼️</span>
           }
         </div>
       ) : (
@@ -1105,7 +1096,7 @@ function EmptyRoot({ onCreate, onImport }) {
           { icon:'📜', label:'Certificats' },
           { icon:'🛒', label:'Amazon FBA' },
         ].map(f=>(
-          <div key={f.label} style={{ padding:'14px 8px', borderRadius:14, background:'#fafal8', border:'1.5px solid #ebebE6', textAlign:'center' }}>
+          <div key={f.label} style={{ padding:'14px 8px', borderRadius:14, background:'#fafaf8', border:'1.5px solid #ebebE6', textAlign:'center' }}>
             <div style={{ fontSize:24, marginBottom:6 }}>{f.icon}</div>
             <div style={{ fontSize:11, color:'#6b7280', fontWeight:600 }}>{f.label}</div>
           </div>

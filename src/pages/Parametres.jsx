@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../lib/store'
 import { useData, mutate } from '../lib/useData'
-import { box, inp, lbl } from '../lib/theme'
+import { box, inp, lbl, colors } from '../lib/theme'
 import { getSettings, updateSettings } from '../lib/supabase'
 
 const CURRENCIES = [
@@ -27,12 +27,17 @@ export default function Parametres() {
     if (res.error?.code === 'PGRST116') return { data: {}, error: null }
     return res
   }, [user])
-  const [settings, setSettings] = useState({ currency: 'EUR', language: 'fr', marketplace: 'fr' })
+  const [settings, setSettings] = useState({ currency: 'EUR', language: 'fr', marketplace: 'fr', seller_id: '' })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (savedSettings) setSettings({ currency: savedSettings.currency || 'EUR', language: savedSettings.language || 'fr', marketplace: savedSettings.marketplace || 'fr' })
+    if (savedSettings) setSettings({
+      currency: savedSettings.currency || 'EUR',
+      language: savedSettings.language || 'fr',
+      marketplace: savedSettings.marketplace || 'fr',
+      seller_id: savedSettings.seller_id || '',
+    })
   }, [savedSettings])
 
   const handleSave = async () => {
@@ -65,7 +70,7 @@ export default function Parametres() {
             </div>
             <div>
               <label style={lbl}>Identifiant vendeur</label>
-              <input style={inp} type="text" placeholder="Ex: AXXXXXXXXXXX" />
+              <input style={inp} type="text" placeholder="Ex: AXXXXXXXXXXX" value={settings.seller_id} onChange={e => setSettings({ ...settings, seller_id: e.target.value })} />
             </div>
           </div>
         </div>
@@ -126,7 +131,7 @@ export default function Parametres() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <button onClick={handleSave} disabled={saving}
-            style={{ padding: '12px 32px', background: saving ? '#9ca3af' : '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
+            style={{ padding: '12px 32px', background: saving ? '#9ca3af' : colors.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
             {saving ? 'Sauvegarde...' : 'Sauvegarder les paramètres'}
           </button>
           {saved && (

@@ -154,6 +154,15 @@ export const addSupplier = async (userId, supplier) => {
   return { data, error }
 }
 
+export const updateSupplier = async (id, updates) => {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
 export const deleteSupplier = async (id) => {
   const { data, error } = await supabase
     .from('suppliers')

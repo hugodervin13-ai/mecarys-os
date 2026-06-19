@@ -1,7 +1,7 @@
 // Repository Fournisseurs — offline-first (même pattern qu'Expéditions).
 // localStorage = source de vérité, Supabase = synchro best-effort.
 
-import { getSuppliers, addSupplier, deleteSupplier } from './supabase'
+import { getSuppliers, addSupplier, updateSupplier as updateSupplierDB, deleteSupplier } from './supabase'
 
 const key = (uid) => `mecarys.suppliers.${uid || 'anon'}`
 
@@ -44,6 +44,14 @@ export async function createSupplier(uid, supplier) {
   const next = [s, ...loadSuppliers(uid)]
   save(uid, next)
   if (await probe(uid)) { try { await addSupplier(uid, s) } catch { /* ignore */ } }
+  return next
+}
+
+export async function updateSupplier(uid, id, updates) {
+  const patch = { ...updates, updated_at: new Date().toISOString() }
+  const next = loadSuppliers(uid).map(s => s.id === id ? { ...s, ...patch } : s)
+  save(uid, next)
+  if (await probe(uid)) { try { await updateSupplierDB(id, patch) } catch { /* ignore */ } }
   return next
 }
 

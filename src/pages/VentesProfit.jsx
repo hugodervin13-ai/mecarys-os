@@ -3,17 +3,17 @@ import { getProducts } from '../lib/supabase'
 import { useStore } from '../lib/store'
 import { useData } from '../lib/useData'
 import { formatCurrency, formatNumber } from '../lib/utils'
-import { box } from '../lib/theme'
+import { box, colors } from '../lib/theme'
 import { computeProfit, margeColor } from '../lib/profit'
-import { DemoBadge } from '../components/ui'
+import { DemoBadge, PageHeader } from '../components/ui'
 import Loading from '../components/Loading'
 import ChartSkeleton from '../components/charts/ChartSkeleton'
 
-// Recharts (~386 Ko) chargé à la demande.
 const VentesArea = lazy(() => import('../components/charts/VentesCharts').then(m => ({ default: m.VentesArea })))
 const VentesBar  = lazy(() => import('../components/charts/VentesCharts').then(m => ({ default: m.VentesBar })))
+const MargesBar  = lazy(() => import('../components/charts/VentesCharts').then(m => ({ default: m.MargesBar })))
 
-const DATA = {
+const DEMO_DATA = {
   '7j': {
     chart: [
       { label: 'Lun', ventes: 12400, profit: 3100 },
@@ -52,23 +52,41 @@ export default function VentesProfit() {
   const { data: productsData, loading } = useData('products', () => getProducts(user.id), [user])
   const products = productsData || []
 
-  const d = DATA[period]
   const profitData = products.map(p => computeProfit(p))
   const hasRealData = profitData.some(m => m.units > 0)
-  const totalCA = hasRealData ? profitData.reduce((a, m) => a + m.revenue30d, 0) : d.ca
-  const totalProfit = hasRealData ? profitData.reduce((a, m) => a + m.profitNet30d, 0) : d.profit
-  const totalUnits = hasRealData ? profitData.reduce((a, m) => a + m.units, 0) : d.units
-  const totalPub = hasRealData ? profitData.reduce((a, m) => a + m.pubPerUnit * m.units, 0) : 0
-  const margin = totalCA > 0 ? ((totalProfit / totalCA) * 100).toFixed(1) : '25.2'
-  const panier = totalUnits > 0 ? totalCA / totalUnits : d.panier
+
+  const totalCA30 = profitData.reduce((a, m) => a + m.revenue30d, 0)
+  const totalProfit30 = profitData.reduce((a, m) => a + m.profitNet30d, 0)
+  const totalUnits30 = profitData.reduce((a, m) => a + m.units, 0)
+
+  const scale = period === '7j' ? 7 / 30 : period === '90j' ? 3 : 1
+  const d = DEMO_DATA[period]
+
+  const totalCA     = hasRealData ? Math.round(totalCA30 * scale)     : d.ca
+  const totalProfit = hasRealData ? Math.round(totalProfit30 * scale) : d.profit
+  const totalUnits  = hasRealData ? Math.round(totalUnits30 * scale)  : d.units
+  const margin      = totalCA > 0 ? ((totalProfit / totalCA) * 100).toFixed(1) : '25.2'
+  const panier      = totalUnits > 0 ? totalCA / totalUnits : d.panier
+
+  const productChartData = profitData.map((m, i) => ({
+    label: (products[i]?.name || `P${i + 1}`).slice(0, 12),
+    ventes: Math.round(m.revenue30d),
+    profit: Math.max(0, Math.round(m.profitNet30d)),
+  }))
+
+  const margesChartData = profitData.map((m, i) => ({
+    label: (products[i]?.name || `P${i + 1}`).slice(0, 12),
+    marge: Math.round(m.margePct * 10) / 10,
+    color: margeColor(m.margePct),
+  }))
 
   if (loading) return <Loading />
 
   const kpis = [
-    { label: `CA total (${period})`, value: formatCurrency(totalCA), change: +22.8, icon: '💰', color: '#6366f1', sub: `${formatNumber(totalUnits)} unités vendues` },
-    { label: `Profit net (${period})`, value: formatCurrency(totalProfit), change: +16.7, icon: '📈', color: '#10b981', sub: `Marge ${margin}%` },
-    { label: 'Marge nette', value: `${margin}%`, change: +2.4, icon: '📊', color: '#3b82f6', sub: margin >= 20 ? 'Bonne marge' : 'À optimiser' },
-    { label: 'Panier moyen', value: formatCurrency(panier), change: +5.1, icon: '🛒', color: '#f59e0b', sub: `Sur ${formatNumber(totalUnits)} commandes` },
+    { label: `CA total (${period})`, value: formatCurrency(totalCA), icon: '💰', color: '#6366f1', sub: `${formatNumber(totalUnits)} unités vendues` },
+    { label: `Profit net (${period})`, value: formatCurrency(totalProfit), icon: '📈', color: '#10b981', sub: `Marge ${margin}%` },
+    { label: 'Marge nette', value: `${margin}%`, icon: '📊', color: '#3b82f6', sub: Number(margin) >= 20 ? 'Bonne marge' : 'À optimiser' },
+    { label: 'Panier moyen', value: formatCurrency(panier), icon: '🛒', color: '#f59e0b', sub: `Sur ${formatNumber(totalUnits)} commandes` },
   ]
 
   return (
@@ -77,9 +95,11 @@ export default function VentesProfit() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Ventes & Profit</h1>
-            <DemoBadge />
+            {!hasRealData && <DemoBadge />}
           </div>
-          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>Analysez vos performances et votre rentabilité par période</p>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 3 }}>
+            {hasRealData ? 'Basé sur vos produits — données 30 derniers jours (estimées pour 7j et 90j)' : 'Analysez vos performances et votre rentabilité par période'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {['7j', '30j', '90j'].map(p => (
@@ -100,10 +120,7 @@ export default function VentesProfit() {
                 <p style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e' }}>{k.value}</p>
                 <p style={{ fontSize: 11, color: k.color, marginTop: 4, fontWeight: 500 }}>{k.sub}</p>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: k.change >= 0 ? '#10b981' : '#ef4444' }}>{k.change >= 0 ? '+' : ''}{k.change}%</span>
-              </div>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: `${k.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{k.icon}</div>
             </div>
           </div>
         ))}
@@ -112,25 +129,37 @@ export default function VentesProfit() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 22 }}>
         <div style={{ ...box, padding: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>Évolution Ventes & Profit</h3>
-            <div style={{ display: 'flex', gap: 14 }}>
-              <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 10, height: 3, background: '#6366f1', borderRadius: 2, display: 'inline-block' }} /> Ventes
-              </span>
-              <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 10, height: 3, background: '#10b981', borderRadius: 2, display: 'inline-block' }} /> Profit
-              </span>
-            </div>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>
+              {hasRealData ? 'Ventes & Profit par produit (30j)' : 'Évolution Ventes & Profit'}
+            </h3>
+            {!hasRealData && (
+              <div style={{ display: 'flex', gap: 14 }}>
+                <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 10, height: 3, background: '#6366f1', borderRadius: 2, display: 'inline-block' }} /> Ventes
+                </span>
+                <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 10, height: 3, background: '#10b981', borderRadius: 2, display: 'inline-block' }} /> Profit
+                </span>
+              </div>
+            )}
           </div>
           <Suspense fallback={<ChartSkeleton height={240} />}>
-            <VentesArea data={d.chart} />
+            {hasRealData
+              ? <VentesBar data={productChartData} />
+              : <VentesArea data={d.chart} />
+            }
           </Suspense>
         </div>
 
         <div style={{ ...box, padding: 22 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', marginBottom: 18 }}>Ventes vs Profit par période</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e', marginBottom: 18 }}>
+            {hasRealData ? 'Marge nette par produit' : 'Ventes vs Profit par période'}
+          </h3>
           <Suspense fallback={<ChartSkeleton height={240} />}>
-            <VentesBar data={d.chart} />
+            {hasRealData
+              ? <MargesBar data={margesChartData} />
+              : <VentesBar data={d.chart} />
+            }
           </Suspense>
         </div>
       </div>

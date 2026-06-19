@@ -1,6 +1,6 @@
 // Graphiques Ventes/Profit — isolés pour charger Recharts à la demande (lazy).
 import {
-  AreaChart, Area, BarChart, Bar,
+  AreaChart, Area, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { formatCurrency } from '../../lib/utils'
@@ -42,6 +42,22 @@ export function VentesBar({ data }) {
         <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => formatCurrency(v)} />
         <Bar dataKey="ventes" fill="#6366f1" radius={[4, 4, 0, 0]} name="Ventes" />
         <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} name="Profit" />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function MargesBar({ data }) {
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} barCategoryGap="35%">
+        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0eb" />
+        <XAxis dataKey="label" stroke="#9ca3af" fontSize={11} interval={0} tick={{ fontSize: 10 }} />
+        <YAxis stroke="#9ca3af" fontSize={11} tickFormatter={v => `${v}%`} unit="%" domain={[0, 'dataMax + 5']} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [`${Number(v).toFixed(1)}%`, 'Marge nette']} />
+        <Bar dataKey="marge" radius={[4, 4, 0, 0]} name="Marge nette">
+          {data.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   )

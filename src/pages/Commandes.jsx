@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '../lib/utils'
 import Loading from '../components/Loading'
 import Modal from '../components/Modal'
 import { listOrders, createOrder, patchOrder, removeOrder, autoOrderRef } from '../lib/ordersRepo'
+import { listSuppliers } from '../lib/suppliersRepo'
 
 const STATUS = {
   pending:       { label: 'En attente',        color: '#f59e0b', icon: '⏳' },
@@ -26,6 +27,12 @@ const emptyForm = {
   quantity: '', cost_total: '', expected_delivery: '', notes: '', status: 'pending',
 }
 
+function isLate(order) {
+  if (!order.expected_delivery) return false
+  if (!ACTIVE_STATUSES.includes(order.status)) return false
+  return new Date(order.expected_delivery) < new Date()
+}
+
 export default function Commandes() {
   const { user } = useStore()
   const uid = user?.id
@@ -33,11 +40,13 @@ export default function Commandes() {
   const [loaded, setLoaded] = useState(false)
   const [synced, setSynced] = useState(false)
   const [products, setProducts] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [filterStatus, setFilterStatus] = useState('all')
   const [search, setSearch] = useState('')
+  const [expandedNotes, setExpandedNotes] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -48,6 +57,7 @@ export default function Commandes() {
       setLoaded(true)
     })
     getProducts(uid).then(({ data }) => alive && setProducts(data || [])).catch(() => {})
+    listSuppliers(uid).then(({ data }) => alive && setSuppliers(data || [])).catch(() => {})
     return () => { alive = false }
   }, [uid])
 
@@ -98,7 +108,6 @@ export default function Commandes() {
     setOrders(next); toast('Commande supprimée', 'success')
   }
 
-  // ---------- Dérivés ----------
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return orders
@@ -110,6 +119,7 @@ export default function Commandes() {
   const inTransit = orders.filter(o => ACTIVE_STATUSES.includes(o.status)).length
   const totalAmount = orders.reduce((a, o) => a + (Number(o.cost_total) || 0), 0)
   const delivered = orders.filter(o => o.status === 'delivered').length
+  const lateCount = orders.filter(isLate).length
 
   if (!loaded) return <Loading />
 
@@ -126,15 +136,17 @@ export default function Commandes() {
         {synced ? 'Synchronisé avec la base' : 'Sauvegarde locale active'}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 22 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 22 }}>
         <KpiCard label="Total commandes" value={orders.length} icon="📋" color={colors.primary} sub="Toutes périodes" />
         <KpiCard label="En attente" value={pending} icon="⏳" color={colors.warning} sub="À confirmer" />
         <KpiCard label="En transit" value={inTransit} icon="🚢" color={colors.info} sub="En route" />
         <KpiCard label="Livrées" value={delivered} icon="✅" color={colors.success} sub="Complétées" />
+        {lateCount > 0 && (
+          <KpiCard label="En retard" value={lateCount} icon="🚨" color={colors.danger} sub="Délai dépassé" />
+        )}
         <KpiCard label="Montant engagé" value={formatCurrency(totalAmount)} icon="💳" color="#10b981" sub="Total commandes" />
       </div>
 
-      {/* Filtres + recherche */}
       <div style={{ ...box, padding: 14, marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <input style={{ ...inp, flex: '2 1 200px' }} placeholder="🔍 N° commande, fournisseur, produit…" value={search} onChange={e => setSearch(e.target.value)} />
         <select style={{ ...inp, flex: '1 1 150px' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
@@ -149,13 +161,12 @@ export default function Commandes() {
         )}
       </div>
 
-      {/* Tableau */}
       <div style={{ ...box, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
             <thead>
               <tr style={{ background: '#fafaf8' }}>
-                {['N° commande', 'Fournisseur', 'Produit', 'Qté', 'Montant', 'Statut', 'Livraison', 'Actions'].map(h => (
+                {['N° commande', 'Fournisseur', 'Produit', 'Qté', 'Montant', 'P.U.', 'Statut', 'Livraison', 'Actions'].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -163,29 +174,57 @@ export default function Commandes() {
             <tbody>
               {filtered.map(order => {
                 const s = STATUS[order.status] || STATUS.pending
+                const late = isLate(order)
+                const qty = Number(order.quantity) || 0
+                const total = Number(order.cost_total) || 0
+                const unitCost = qty > 0 ? total / qty : null
+                const hasNotes = !!order.notes
                 return (
-                  <tr key={order.id} style={{ borderTop: '1px solid #f0f0eb' }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#fafaf8'}
-                    onMouseLeave={e => e.currentTarget.style.background = ''}>
-                    <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{order.order_number}</td>
-                    <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: colors.text }}>{order.supplier || '—'}</td>
-                    <td style={{ padding: '12px 16px', fontSize: 12, color: colors.textMuted }}>{order.product_name || order.products?.name || '—'}</td>
-                    <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 700, color: colors.text }}>{order.quantity || '—'}</td>
-                    <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 700, color: colors.primary, whiteSpace: 'nowrap' }}>{formatCurrency(Number(order.cost_total) || 0)}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <select value={order.status} onChange={e => handleStatusChange(order.id, e.target.value)}
-                        style={{ padding: '4px 10px', borderRadius: 20, border: `1px solid ${s.color}40`, background: `${s.color}15`, color: s.color, fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
-                        {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
-                      </select>
-                    </td>
-                    <td style={{ padding: '12px 16px', fontSize: 12, color: colors.textMuted, whiteSpace: 'nowrap' }}>
-                      {order.expected_delivery ? formatDate(order.expected_delivery) : '—'}
-                    </td>
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      <button onClick={() => openEdit(order)} style={{ fontSize: 12, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, marginRight: 10 }}>✏️ Modifier</button>
-                      <button onClick={() => handleDelete(order.id)} style={{ fontSize: 12, color: colors.danger, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Supprimer</button>
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={order.id} style={{ borderTop: '1px solid #f0f0eb', background: late ? '#fef2f2' : '' }}
+                      onMouseEnter={e => !late && (e.currentTarget.style.background = '#fafaf8')}
+                      onMouseLeave={e => e.currentTarget.style.background = late ? '#fef2f2' : ''}>
+                      <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: 'monospace' }}>{order.order_number}</div>
+                        {hasNotes && (
+                          <button onClick={() => setExpandedNotes(expandedNotes === order.id ? null : order.id)}
+                            style={{ fontSize: 11, color: colors.textFaint, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 2 }}>
+                            {expandedNotes === order.id ? '▲ masquer' : '📝 notes'}
+                          </button>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: colors.text }}>{order.supplier || '—'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 12, color: colors.textMuted }}>{order.product_name || order.products?.name || '—'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 700, color: colors.text }}>{order.quantity || '—'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 700, color: colors.primary, whiteSpace: 'nowrap' }}>{formatCurrency(total)}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 12, color: colors.textMuted, whiteSpace: 'nowrap' }}>
+                        {unitCost !== null ? formatCurrency(unitCost) : '—'}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <select value={order.status} onChange={e => handleStatusChange(order.id, e.target.value)}
+                            style={{ padding: '4px 10px', borderRadius: 20, border: `1px solid ${s.color}40`, background: `${s.color}15`, color: s.color, fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
+                            {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+                          </select>
+                          {late && <span style={{ fontSize: 10, fontWeight: 700, color: colors.danger }}>🚨 En retard</span>}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: 12, color: late ? colors.danger : colors.textMuted, fontWeight: late ? 700 : 400, whiteSpace: 'nowrap' }}>
+                        {order.expected_delivery ? formatDate(order.expected_delivery) : '—'}
+                      </td>
+                      <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => openEdit(order)} style={{ fontSize: 12, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, marginRight: 10 }}>✏️ Modifier</button>
+                        <button onClick={() => handleDelete(order.id)} style={{ fontSize: 12, color: colors.danger, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Supprimer</button>
+                      </td>
+                    </tr>
+                    {expandedNotes === order.id && (
+                      <tr key={`${order.id}-notes`} style={{ background: '#fffbeb' }}>
+                        <td colSpan={9} style={{ padding: '8px 16px 12px', fontSize: 12, color: colors.textMuted, fontStyle: 'italic', borderTop: '1px dashed #fde68a' }}>
+                          📝 {order.notes}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )
               })}
             </tbody>
@@ -202,13 +241,6 @@ export default function Commandes() {
         )}
       </div>
 
-      {/* Notes */}
-      {orders.some(o => o.notes) && (
-        <div style={{ marginTop: 14, fontSize: 12, color: colors.textFaint, fontStyle: 'italic' }}>
-          💡 Consultez chaque commande via « Modifier » pour voir ses notes détaillées.
-        </div>
-      )}
-
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editingId ? 'Modifier la commande' : 'Nouvelle commande fournisseur'}>
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -218,7 +250,28 @@ export default function Commandes() {
             </div>
             <div>
               <label style={lbl}>Fournisseur *</label>
-              <input style={inp} type="text" value={form.supplier} onChange={e => setForm({ ...form, supplier: e.target.value })} required />
+              {suppliers.length > 0 ? (
+                <select style={inp} value={form.supplier} onChange={e => setForm({ ...form, supplier: e.target.value })} required>
+                  <option value="">— Sélectionner un fournisseur —</option>
+                  {suppliers.filter(s => s.status === 'active').map(s => (
+                    <option key={s.id} value={s.name}>{COUNTRY_FLAGS_INLINE[s.country] || '🏭'} {s.name}</option>
+                  ))}
+                  {suppliers.some(s => s.status !== 'active') && (
+                    <>
+                      <option disabled>── Inactifs ──</option>
+                      {suppliers.filter(s => s.status !== 'active').map(s => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                    </>
+                  )}
+                  <option value="__other__">✏️ Autre (saisie libre)</option>
+                </select>
+              ) : (
+                <input style={inp} type="text" value={form.supplier} onChange={e => setForm({ ...form, supplier: e.target.value })} required />
+              )}
+              {form.supplier === '__other__' && (
+                <input style={{ ...inp, marginTop: 6 }} type="text" placeholder="Nom du fournisseur" onChange={e => setForm({ ...form, supplier: e.target.value })} autoFocus />
+              )}
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
@@ -242,6 +295,11 @@ export default function Commandes() {
               <input style={inp} type="number" step="0.01" min="0" value={form.cost_total} onChange={e => setForm({ ...form, cost_total: e.target.value })} required />
             </div>
           </div>
+          {form.quantity > 0 && form.cost_total > 0 && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: `${colors.primary}08`, borderRadius: 8, fontSize: 12, color: colors.textMuted }}>
+              💡 Coût unitaire : <strong style={{ color: colors.primary }}>{formatCurrency(Number(form.cost_total) / Number(form.quantity))}</strong>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={lbl}>Statut</label>
@@ -265,4 +323,12 @@ export default function Commandes() {
       </Modal>
     </div>
   )
+}
+
+const COUNTRY_FLAGS_INLINE = {
+  'Chine': '🇨🇳', 'China': '🇨🇳', 'Inde': '🇮🇳', 'India': '🇮🇳',
+  'Turquie': '🇹🇷', 'Turkey': '🇹🇷', 'Vietnam': '🇻🇳', 'Bangladesh': '🇧🇩',
+  'France': '🇫🇷', 'Allemagne': '🇩🇪', 'Germany': '🇩🇪', 'Italie': '🇮🇹',
+  'Espagne': '🇪🇸', 'Maroc': '🇲🇦', 'Portugal': '🇵🇹', 'Thaïlande': '🇹🇭',
+  'Indonésie': '🇮🇩', 'Pakistan': '🇵🇰', 'Cambodge': '🇰🇭',
 }

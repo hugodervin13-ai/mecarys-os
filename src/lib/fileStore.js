@@ -53,7 +53,7 @@ export const ACCEPTED_EXT = [
 export const ACCEPT_ATTR = '.jpg,.jpeg,.png,.webp,.gif,.heic,.avif,.pdf,.mp4,.mov,.avi,.mkv,.webm,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.rtf'
 const MAX_SIZE = 500 * 1024 * 1024 // 500 Mo
 
-export const extOf = (name = '') => (name.split('.').pop() || '').toLowerCase()
+export const extOf = (name = '') => ((name || '').split('.').pop() || '').toLowerCase()
 
 export const kindOf = (ext) => {
   if (['jpg','jpeg','png','webp','gif','heic','avif'].includes(ext)) return 'image'
